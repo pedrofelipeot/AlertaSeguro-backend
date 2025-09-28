@@ -2,14 +2,13 @@ const express = require('express');
 const admin = require('firebase-admin');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Inicializa Firebase Admin
-const serviceAccount = require('./serviceAccountKey.json');
+// Inicializa Firebase Admin usando variável de ambiente
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -44,13 +43,12 @@ app.post('/motion-detected', async (req, res) => {
 
   console.log('Movimento detectado no sensor:', sensor);
 
-  // Mensagem de notificação
   const message = {
     notification: {
       title: 'Alerta de Movimento!',
       body: `Movimento detectado no sensor ${sensor}`
     },
-    tokens: tokens // envia para todos os tokens registrados
+    tokens: tokens
   };
 
   try {
