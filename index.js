@@ -10,6 +10,9 @@ app.use(bodyParser.json());
 // Inicializa Firebase Admin usando variável de ambiente
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
+// Ajuste para corrigir o private_key no formato PEM
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -42,6 +45,10 @@ app.post('/motion-detected', async (req, res) => {
   if (!sensor) return res.status(400).json({ error: 'Sensor não informado' });
 
   console.log('Movimento detectado no sensor:', sensor);
+
+  if (tokens.length === 0) {
+    return res.status(400).json({ error: 'Nenhum token registrado' });
+  }
 
   const message = {
     notification: {
