@@ -19,26 +19,28 @@ admin.initializeApp({
 
 console.log('Firebase Admin inicializado');
 
-// Referência ao Firestore
 const db = admin.firestore();
-const tokensCollection = db.collection('deviceTokens');
 
 // ===============================
 // Rotas
 // ===============================
 
-// Recebe token do app e salva
+// Registra token FCM para sensor específico
 app.post('/register-token', async (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ error: 'Token não enviado' });
+  const { userId, sensorId, token } = req.body;
+
+  if (!userId || !sensorId || !token) {
+    return res.status(400).json({ error: 'userId, sensorId e token são obrigatórios' });
+  }
 
   try {
-    // Salva no Firestore (doc com ID = token)
-    await tokensCollection.doc(token).set({
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    const tokenRef = db.collection('users').doc(userId).collection('sensors').doc(sensorId);
+    await tokenRef.set({
+      token,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    console.log('Token registrado:', token);
+    console.log(`Token registrado: ${token} para usuário ${userId}, sensor ${sensorId}`);
     res.json({ message: 'Token registrado com sucesso' });
   } catch (err) {
     console.error('Erro ao registrar token:', err);
@@ -48,40 +50,35 @@ app.post('/register-token', async (req, res) => {
 
 // Recebe evento do ESP32 e envia notificação
 app.post('/motion-detected', async (req, res) => {
-  const { sensor } = req.body;
-  if (!sensor) return res.status(400).json({ error: 'Sensor não informado' });
+  const { userId, sensorId } = req.body;
 
-  console.log('Movimento detectado no sensor:', sensor);
+  if (!userId || !sensorId) {
+    return res.status(400).json({ error: 'userId e sensorId são obrigatórios' });
+  }
+
+  console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
 
   try {
-    // Busca todos os tokens do Firestore
-    const snapshot = await tokensCollection.get();
-    if (snapshot.empty) {
-      return res.status(400).json({ error: 'Nenhum token registrado' });
+    const tokenDoc = await db.collection('users').doc(userId).collection('sensors').doc(sensorId).get();
+
+    if (!tokenDoc.exists) {
+      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
     }
 
-    const tokens = snapshot.docs.map(doc => doc.id);
+    const token = tokenDoc.data().token;
 
     const message = {
       notification: {
         title: 'Alerta de Movimento!',
-        body: `Movimento detectado no sensor ${sensor}`
+        body: `Movimento detectado no sensor ${sensorId}`
       },
-      tokens: tokens
+      token: token
     };
 
-    const response = await admin.messaging().sendMulticast(message);
-    console.log('Notificação enviada:', response.successCount, 'sucessos');
+    const response = await admin.messaging().send(message);
+    console.log('Notificação enviada com sucesso');
 
-    // Remove tokens inválidos
-    response.responses.forEach((r, i) => {
-      if (!r.success) {
-        console.warn('Token inválido, removendo:', tokens[i]);
-        tokensCollection.doc(tokens[i]).delete();
-      }
-    });
-
-    res.json({ success: true, sent: response.successCount });
+    res.json({ success: true });
   } catch (err) {
     console.error('Erro ao enviar notificação:', err);
     res.status(500).json({ error: 'Falha ao enviar notificação' });
