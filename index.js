@@ -19,24 +19,31 @@ admin.initializeApp({
 
 console.log('Firebase Admin inicializado');
 
-// Banco simples em memória para tokens (pode depois migrar para Firestore)
-let tokens = [];
+// Referência ao Firestore
+const db = admin.firestore();
+const tokensCollection = db.collection('deviceTokens');
 
 // ===============================
 // Rotas
 // ===============================
 
 // Recebe token do app e salva
-app.post('/register-token', (req, res) => {
+app.post('/register-token', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token não enviado' });
 
-  if (!tokens.includes(token)) {
-    tokens.push(token);
-    console.log('Token registrado:', token);
-  }
+  try {
+    // Salva no Firestore (doc com ID = token)
+    await tokensCollection.doc(token).set({
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
-  res.json({ message: 'Token registrado com sucesso' });
+    console.log('Token registrado:', token);
+    res.json({ message: 'Token registrado com sucesso' });
+  } catch (err) {
+    console.error('Erro ao registrar token:', err);
+    res.status(500).json({ error: 'Falha ao registrar token' });
+  }
 });
 
 // Recebe evento do ESP32 e envia notificação
@@ -46,21 +53,34 @@ app.post('/motion-detected', async (req, res) => {
 
   console.log('Movimento detectado no sensor:', sensor);
 
-  if (tokens.length === 0) {
-    return res.status(400).json({ error: 'Nenhum token registrado' });
-  }
-
-  const message = {
-    notification: {
-      title: 'Alerta de Movimento!',
-      body: `Movimento detectado no sensor ${sensor}`
-    },
-    tokens: tokens
-  };
-
   try {
+    // Busca todos os tokens do Firestore
+    const snapshot = await tokensCollection.get();
+    if (snapshot.empty) {
+      return res.status(400).json({ error: 'Nenhum token registrado' });
+    }
+
+    const tokens = snapshot.docs.map(doc => doc.id);
+
+    const message = {
+      notification: {
+        title: 'Alerta de Movimento!',
+        body: `Movimento detectado no sensor ${sensor}`
+      },
+      tokens: tokens
+    };
+
     const response = await admin.messaging().sendMulticast(message);
     console.log('Notificação enviada:', response.successCount, 'sucessos');
+
+    // Remove tokens inválidos
+    response.responses.forEach((r, i) => {
+      if (!r.success) {
+        console.warn('Token inválido, removendo:', tokens[i]);
+        tokensCollection.doc(tokens[i]).delete();
+      }
+    });
+
     res.json({ success: true, sent: response.successCount });
   } catch (err) {
     console.error('Erro ao enviar notificação:', err);
