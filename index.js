@@ -23,7 +23,7 @@ const db = admin.firestore();
 // Rotas
 // ===============================
 
-// 1. Registrar token FCM para usuário (sem sensorId)
+// 1. Registrar token FCM para usuário
 app.post('/register-token', async (req, res) => {
   const { userId, token } = req.body;
 
@@ -58,7 +58,11 @@ app.post('/motion-detected', async (req, res) => {
   console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
 
   try {
+    console.log('Verificando usuário no Firestore:', userId);
+
     const userDoc = await db.collection('users').doc(userId).get();
+
+    console.log('Documento encontrado?', userDoc.exists);
 
     if (!userDoc.exists) {
       return res.status(400).json({ error: 'Usuário não encontrado' });
