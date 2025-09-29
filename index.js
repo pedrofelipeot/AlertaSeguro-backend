@@ -23,27 +23,23 @@ const db = admin.firestore();
 // Rotas
 // ===============================
 
-// 1. Registrar token FCM para sensor específico
+// 1. Registrar token FCM para usuário (sem sensorId)
 app.post('/register-token', async (req, res) => {
-  const { userId, sensorId, token } = req.body;
+  const { userId, token } = req.body;
 
-  if (!userId || !sensorId || !token) {
-    return res.status(400).json({ error: 'userId, sensorId e token são obrigatórios' });
+  if (!userId || !token) {
+    return res.status(400).json({ error: 'userId e token são obrigatórios' });
   }
 
   try {
-    const tokenRef = db
-      .collection('users')
-      .doc(userId)
-      .collection('sensors')
-      .doc(sensorId);
+    const userRef = db.collection('users').doc(userId);
 
-    await tokenRef.set({
+    await userRef.set({
       token,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    console.log(`Token registrado: ${token} para usuário ${userId}, sensor ${sensorId}`);
+    console.log(`Token registrado: ${token} para usuário ${userId}`);
     res.json({ message: 'Token registrado com sucesso' });
   } catch (err) {
     console.error('Erro ao registrar token:', err);
@@ -62,21 +58,16 @@ app.post('/motion-detected', async (req, res) => {
   console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
 
   try {
-    const sensorDoc = await db
-      .collection('users')
-      .doc(userId)
-      .collection('sensors')
-      .doc(sensorId)
-      .get();
+    const userDoc = await db.collection('users').doc(userId).get();
 
-    if (!sensorDoc.exists) {
-      return res.status(400).json({ error: 'Sensor não encontrado' });
+    if (!userDoc.exists) {
+      return res.status(400).json({ error: 'Usuário não encontrado' });
     }
 
-    const token = sensorDoc.data().token;
+    const token = userDoc.data().token;
 
     if (!token) {
-      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
+      return res.status(400).json({ error: 'Nenhum token registrado para esse usuário' });
     }
 
     const message = {
@@ -88,7 +79,7 @@ app.post('/motion-detected', async (req, res) => {
     };
 
     const response = await admin.messaging().send(message);
-    console.log('Notificação enviada com sucesso');
+    console.log('Notificação enviada com sucesso:', response);
 
     res.json({ success: true });
   } catch (err) {
