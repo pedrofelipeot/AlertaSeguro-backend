@@ -9,8 +9,6 @@ app.use(bodyParser.json());
 
 // Inicializa Firebase Admin usando variável de ambiente
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
-// Ajuste para corrigir o private_key no formato PEM
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
 admin.initializeApp({
@@ -25,7 +23,7 @@ const db = admin.firestore();
 // Rotas
 // ===============================
 
-// Registra token FCM para sensor específico
+// 1. Registrar token FCM para sensor específico
 app.post('/register-token', async (req, res) => {
   const { userId, sensorId, token } = req.body;
 
@@ -34,11 +32,16 @@ app.post('/register-token', async (req, res) => {
   }
 
   try {
-    const tokenRef = db.collection('users').doc(userId).collection('sensors').doc(sensorId);
+    const tokenRef = db
+      .collection('users')
+      .doc(userId)
+      .collection('sensors')
+      .doc(sensorId);
+
     await tokenRef.set({
       token,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    }, { merge: true });
 
     console.log(`Token registrado: ${token} para usuário ${userId}, sensor ${sensorId}`);
     res.json({ message: 'Token registrado com sucesso' });
@@ -48,7 +51,7 @@ app.post('/register-token', async (req, res) => {
   }
 });
 
-// Recebe evento do ESP32 e envia notificação
+// 2. Recebe evento do ESP32 e envia notificação
 app.post('/motion-detected', async (req, res) => {
   const { userId, sensorId } = req.body;
 
@@ -59,13 +62,22 @@ app.post('/motion-detected', async (req, res) => {
   console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
 
   try {
-    const tokenDoc = await db.collection('users').doc(userId).collection('sensors').doc(sensorId).get();
+    const sensorDoc = await db
+      .collection('users')
+      .doc(userId)
+      .collection('sensors')
+      .doc(sensorId)
+      .get();
 
-    if (!tokenDoc.exists) {
-      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
+    if (!sensorDoc.exists) {
+      return res.status(400).json({ error: 'Sensor não encontrado' });
     }
 
-    const token = tokenDoc.data().token;
+    const token = sensorDoc.data().token;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
+    }
 
     const message = {
       notification: {
@@ -85,7 +97,7 @@ app.post('/motion-detected', async (req, res) => {
   }
 });
 
-// Teste de rota
+// Rota teste
 app.get('/', (req, res) => {
   res.send('Backend do Alerta Seguro funcionando!');
 });
