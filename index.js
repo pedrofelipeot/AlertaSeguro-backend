@@ -23,23 +23,27 @@ const db = admin.firestore();
 // Rotas
 // ===============================
 
-// 1. Registrar token FCM para usuário
+// Registrar token FCM para sensor
 app.post('/register-token', async (req, res) => {
-  const { userId, token } = req.body;
+  const { userId, sensorId, token } = req.body;
 
-  if (!userId || !token) {
-    return res.status(400).json({ error: 'userId e token são obrigatórios' });
+  if (!userId || !sensorId || !token) {
+    return res.status(400).json({ error: 'userId, sensorId e token são obrigatórios' });
   }
 
   try {
-    const userRef = db.collection('users').doc(userId);
+    const sensorRef = db
+      .collection('users')
+      .doc(userId)
+      .collection('sensors')
+      .doc(sensorId);
 
-    await userRef.set({
+    await sensorRef.set({
       token,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    console.log(`Token registrado: ${token} para usuário ${userId}`);
+    console.log(`Token registrado: ${token} para usuário ${userId}, sensor ${sensorId}`);
     res.json({ message: 'Token registrado com sucesso' });
   } catch (err) {
     console.error('Erro ao registrar token:', err);
@@ -47,7 +51,7 @@ app.post('/register-token', async (req, res) => {
   }
 });
 
-// 2. Recebe evento do ESP32 e envia notificação
+// Recebe evento do ESP32 e envia notificação
 app.post('/motion-detected', async (req, res) => {
   const { userId, sensorId } = req.body;
 
@@ -56,22 +60,26 @@ app.post('/motion-detected', async (req, res) => {
   }
 
   console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
+  console.log('Verificando sensor no Firestore:', sensorId);
 
   try {
-    console.log('Verificando usuário no Firestore:', userId);
+    const sensorDocRef = db
+      .collection('users')
+      .doc(userId)
+      .collection('sensors')
+      .doc(sensorId);
 
-    const userDoc = await db.collection('users').doc(userId).get();
+    const sensorDoc = await sensorDocRef.get();
 
-    console.log('Documento encontrado?', userDoc.exists);
+    console.log('Documento encontrado?', sensorDoc.exists);
 
-    if (!userDoc.exists) {
-      return res.status(400).json({ error: 'Usuário não encontrado' });
+    if (!sensorDoc.exists) {
+      return res.status(400).json({ error: 'Sensor não encontrado' });
     }
 
-    const token = userDoc.data().token;
-
+    const token = sensorDoc.data()?.token;
     if (!token) {
-      return res.status(400).json({ error: 'Nenhum token registrado para esse usuário' });
+      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
     }
 
     const message = {
