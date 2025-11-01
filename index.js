@@ -2,29 +2,18 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
-const firebase = require("firebase");
 
 // =======================
-// Configuração Firebase
+// Configuração Firebase Admin
 // =======================
 
-// Firebase Admin SDK (para backend)
-const serviceAccount = require("./serviceAccountKey.json"); // Baixe do Firebase
+const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
-const db = admin.firestore();
 
-// Firebase Client SDK (para Auth no backend)
-firebase.initializeApp({
-  apiKey: "AIzaSyDKjlG92GIpPFYa_R1wwSLMyG4BPyFtPis",
-  authDomain: "alertaseguro-9f47e.firebaseapp.com",
-  projectId: "alertaseguro-9f47e",
-  storageBucket: "alertaseguro-9f47e.firebasestorage.app",
-  messagingSenderId: "706008625809",
-  appId: "1:706008625809:web:9c7707d28a429d0cdac530"
-});
+const db = admin.firestore();
 
 // =======================
 // Configuração Express
@@ -40,8 +29,14 @@ app.use(bodyParser.json());
 app.post("/auth/register", async (req, res) => {
   const { email, password, nome } = req.body;
   try {
-    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-    const uid = userCredential.user.uid;
+    // Criar usuário no Firebase Auth
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName: nome
+    });
+
+    const uid = userRecord.uid;
 
     // Criar documento do usuário no Firestore
     await db.collection("users").doc(uid).set({
@@ -58,12 +53,13 @@ app.post("/auth/register", async (req, res) => {
 });
 
 // Login do usuário
+// Obs: Com Firebase Admin SDK, não tem "signInWithEmailAndPassword"
+// Então o ideal é criar **token custom** ou autenticar direto no frontend
 app.post("/auth/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { uid } = req.body; // você pode enviar o UID do frontend ou usar token custom
   try {
-    const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-    const uid = userCredential.user.uid;
-    res.status(200).send({ uid });
+    const userRecord = await admin.auth().getUser(uid);
+    res.status(200).send({ uid: userRecord.uid, displayName: userRecord.displayName });
   } catch (error) {
     res.status(400).send({ error: error.message });
   }
@@ -131,5 +127,5 @@ app.post("/esp/event", async (req, res) => {
 // =======================
 // Iniciar servidor
 // =======================
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
