@@ -1,110 +1,135 @@
-const express = require('express');
-const admin = require('firebase-admin');
-const bodyParser = require('body-parser');
-const cors = require('cors');
+// backend.js
+const express = require("express");
+const bodyParser = require("body-parser");
+const admin = require("firebase-admin");
+const firebase = require("firebase");
 
-const app = express();
-app.use(cors());
-app.use(bodyParser.json());
+// =======================
+// Configuração Firebase
+// =======================
 
-// Inicializa Firebase Admin usando variável de ambiente
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+// Firebase Admin SDK (para backend)
+const serviceAccount = require("./serviceAccountKey.json"); // Baixe do Firebase
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
-
-console.log('Firebase Admin inicializado');
-
 const db = admin.firestore();
 
-// ===============================
-// Rotas
-// ===============================
+// Firebase Client SDK (para Auth no backend)
+firebase.initializeApp({
+  apiKey: "AIzaSyDKjlG92GIpPFYa_R1wwSLMyG4BPyFtPis",
+  authDomain: "alertaseguro-9f47e.firebaseapp.com",
+  projectId: "alertaseguro-9f47e",
+  storageBucket: "alertaseguro-9f47e.firebasestorage.app",
+  messagingSenderId: "706008625809",
+  appId: "1:706008625809:web:9c7707d28a429d0cdac530"
+});
 
-// Registrar token FCM para sensor
-app.post('/register-token', async (req, res) => {
-  const { userId, sensorId, token } = req.body;
+// =======================
+// Configuração Express
+// =======================
+const app = express();
+app.use(bodyParser.json());
 
-  if (!userId || !sensorId || !token) {
-    return res.status(400).json({ error: 'userId, sensorId e token são obrigatórios' });
-  }
+// =======================
+// Rotas Auth
+// =======================
 
+// Registrar usuário
+app.post("/auth/register", async (req, res) => {
+  const { email, password, nome } = req.body;
   try {
-    const sensorRef = db
-      .collection('users')
-      .doc(userId)
-      .collection('sensors')
-      .doc(sensorId);
+    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+    const uid = userCredential.user.uid;
 
-    await sensorRef.set({
-      token,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    // Criar documento do usuário no Firestore
+    await db.collection("users").doc(uid).set({
+      email,
+      nome,
+      fcmToken: "",
+      espDevices: []
+    });
 
-    console.log(`Token registrado: ${token} para usuário ${userId}, sensor ${sensorId}`);
-    res.json({ message: 'Token registrado com sucesso' });
-  } catch (err) {
-    console.error('Erro ao registrar token:', err);
-    res.status(500).json({ error: 'Falha ao registrar token' });
+    res.status(201).send({ uid });
+  } catch (error) {
+    res.status(400).send({ error: error.message });
   }
 });
 
-// Recebe evento do ESP32 e envia notificação
-app.post('/motion-detected', async (req, res) => {
-  const { userId, sensorId } = req.body;
-
-  if (!userId || !sensorId) {
-    return res.status(400).json({ error: 'userId e sensorId são obrigatórios' });
-  }
-
-  console.log('Movimento detectado no sensor:', sensorId, 'usuário:', userId);
-  console.log('Verificando sensor no Firestore:', sensorId);
-
+// Login do usuário
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
   try {
-    const sensorDocRef = db
-      .collection('users')
-      .doc(userId)
-      .collection('sensors')
-      .doc(sensorId);
+    const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+    const uid = userCredential.user.uid;
+    res.status(200).send({ uid });
+  } catch (error) {
+    res.status(400).send({ error: error.message });
+  }
+});
 
-    const sensorDoc = await sensorDocRef.get();
+// =======================
+// Rotas ESP
+// =======================
 
-    console.log('Documento encontrado?', sensorDoc.exists);
+// Cadastrar ESP
+app.post("/esp/register", async (req, res) => {
+  const { uid, mac, nome } = req.body;
+  try {
+    // Criar documento do ESP
+    await db.collection("espDevices").doc(mac).set({
+      userId: uid,
+      nome
+    });
 
-    if (!sensorDoc.exists) {
-      return res.status(400).json({ error: 'Sensor não encontrado' });
-    }
+    // Adicionar MAC ao array do usuário
+    const userRef = db.collection("users").doc(uid);
+    await userRef.update({
+      espDevices: admin.firestore.FieldValue.arrayUnion(mac)
+    });
 
-    const token = sensorDoc.data()?.token;
-    if (!token) {
-      return res.status(400).json({ error: 'Nenhum token registrado para esse sensor' });
-    }
+    res.status(201).send({ msg: "ESP cadastrado com sucesso" });
+  } catch (error) {
+    res.status(400).send({ error: error.message });
+  }
+});
 
-    const message = {
+// Receber evento do ESP e enviar notificação
+app.post("/esp/event", async (req, res) => {
+  const { mac, mensagem } = req.body;
+  try {
+    // Buscar documento do ESP
+    const espDoc = await db.collection("espDevices").doc(mac).get();
+    if (!espDoc.exists) return res.status(404).send({ error: "ESP não cadastrado" });
+
+    const { userId } = espDoc.data();
+
+    // Buscar token do usuário
+    const userDoc = await db.collection("users").doc(userId).get();
+    if (!userDoc.exists) return res.status(404).send({ error: "Usuário não encontrado" });
+
+    const { fcmToken } = userDoc.data();
+    if (!fcmToken) return res.status(400).send({ error: "Usuário não registrou token FCM" });
+
+    // Enviar notificação FCM
+    const messageFCM = {
+      token: fcmToken,
       notification: {
-        title: 'Alerta de Movimento!',
-        body: `Movimento detectado no sensor ${sensorId}`
-      },
-      token: token
+        title: "Alerta de Movimento",
+        body: mensagem
+      }
     };
 
-    const response = await admin.messaging().send(message);
-    console.log('Notificação enviada com sucesso:', response);
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Erro ao enviar notificação:', err);
-    res.status(500).json({ error: 'Falha ao enviar notificação' });
+    await admin.messaging().send(messageFCM);
+    res.status(200).send({ msg: "Notificação enviada" });
+  } catch (error) {
+    res.status(400).send({ error: error.message });
   }
 });
 
-// Rota teste
-app.get('/', (req, res) => {
-  res.send('Backend do Alerta Seguro funcionando!');
-});
-
-// Inicia servidor
-const PORT = process.env.PORT || 3000;
+// =======================
+// Iniciar servidor
+// =======================
+const PORT = 3000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
