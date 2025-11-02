@@ -2,7 +2,7 @@
 // index.js - Backend completo (Firebase + CORS + Render compatível)
 // =======================
 
-require('dotenv').config(); // Carrega variáveis do .env
+require('dotenv').config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
@@ -32,7 +32,6 @@ const serviceAccount = {
   universe_domain: process.env.UNIVERSE_DOMAIN,
 };
 
-// Inicializa o Firebase Admin
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -44,7 +43,6 @@ const db = admin.firestore();
 // =======================
 const app = express();
 
-// ✅ CORS configurado (libera localhost e Vercel)
 app.use(cors({
   origin: [
     "http://localhost:8100",
@@ -92,14 +90,21 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-// Login
+// Login (recomendado: use Firebase Client SDK no frontend)
 app.post("/auth/login", async (req, res) => {
-  const { uid } = req.body;
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).send({ error: "O email é obrigatório" });
+  }
+
   try {
-    const userRecord = await admin.auth().getUser(uid);
+    const userRecord = await admin.auth().getUserByEmail(email);
+
     res.status(200).send({
       uid: userRecord.uid,
       displayName: userRecord.displayName,
+      email: userRecord.email
     });
   } catch (error) {
     console.error("Erro ao logar:", error);
