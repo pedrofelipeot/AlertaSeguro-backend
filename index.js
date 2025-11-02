@@ -1,16 +1,26 @@
+// =======================
+// index.js - Backend completo (com CORS corrigido)
+// =======================
+
+require('dotenv').config(); // Carrega variáveis do .env
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
+const cors = require("cors"); // ✅ Importa CORS
 
 // =======================
 // Configuração Firebase Admin (com variáveis de ambiente)
 // =======================
 
+if (!process.env.PRIVATE_KEY) {
+  throw new Error("A variável de ambiente PRIVATE_KEY não está definida!");
+}
+
 const serviceAccount = {
   type: process.env.TYPE,
   project_id: process.env.PROJECT_ID,
   private_key_id: process.env.PRIVATE_KEY_ID,
-  private_key: process.env.PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  private_key: process.env.PRIVATE_KEY.replace(/\\n/g, '\n'),
   client_email: process.env.CLIENT_EMAIL,
   client_id: process.env.CLIENT_ID,
   auth_uri: process.env.AUTH_URI,
@@ -30,7 +40,25 @@ const db = admin.firestore();
 // Configuração Express
 // =======================
 const app = express();
+
+// ✅ Adiciona CORS antes das rotas
+app.use(cors({
+  origin: ["http://localhost:8100", "https://alertaseguro-frontend.vercel.app"], // adicione outras origens se precisar
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
+// ✅ Permite que o navegador envie requisições OPTIONS automaticamente
+app.options("*", cors());
+
+// ✅ Garante que o corpo JSON será interpretado
 app.use(bodyParser.json());
+
+// Log simples para debug
+app.use((req, res, next) => {
+  console.log(`[${req.method}] ${req.url} | Body:`, req.body);
+  next();
+});
 
 // =======================
 // Rotas Auth
@@ -57,6 +85,7 @@ app.post("/auth/register", async (req, res) => {
 
     res.status(201).send({ uid });
   } catch (error) {
+    console.error("Erro ao registrar usuário:", error);
     res.status(400).send({ error: error.message });
   }
 });
@@ -71,6 +100,7 @@ app.post("/auth/login", async (req, res) => {
       displayName: userRecord.displayName
     });
   } catch (error) {
+    console.error("Erro ao logar:", error);
     res.status(400).send({ error: error.message });
   }
 });
@@ -95,6 +125,7 @@ app.post("/esp/register", async (req, res) => {
 
     res.status(201).send({ msg: "ESP cadastrado com sucesso" });
   } catch (error) {
+    console.error("Erro ao cadastrar ESP:", error);
     res.status(400).send({ error: error.message });
   }
 });
@@ -128,6 +159,7 @@ app.post("/esp/event", async (req, res) => {
     await admin.messaging().send(messageFCM);
     res.status(200).send({ msg: "Notificação enviada" });
   } catch (error) {
+    console.error("Erro ao enviar notificação:", error);
     res.status(400).send({ error: error.message });
   }
 });
@@ -136,6 +168,4 @@ app.post("/esp/event", async (req, res) => {
 // Iniciar servidor
 // =======================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
-console.log(serviceAccount.private_key);
-
+app.listen(PORT, () => console.log(`✅ Servidor rodando na porta ${PORT}`));
