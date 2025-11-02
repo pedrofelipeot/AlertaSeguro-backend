@@ -116,26 +116,38 @@ app.post("/auth/login", async (req, res) => {
 // Rotas ESP
 // =======================
 
-// Cadastrar ESP
+// Cadastrar ESP corretamente dentro do usuário
 app.post("/esp/register", async (req, res) => {
-  const { uid, mac, nome } = req.body;
+  const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
+
+  if (!uid || !mac || !nome) {
+    return res.status(400).send({ error: "UID, MAC e nome são obrigatórios" });
+  }
+
   try {
-    await db.collection("espDevices").doc(mac).set({
-      userId: uid,
+    // Referência da subcoleção do usuário
+    const espRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(mac);
+
+    // Salva o documento dentro da subcoleção
+    await espRef.set({
       nome,
+      localizacao,
+      tipo,
+      userId: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    const userRef = db.collection("users").doc(uid);
-    await userRef.update({
-      espDevices: admin.firestore.FieldValue.arrayUnion(mac),
-    });
-
-    res.status(201).send({ msg: "ESP cadastrado com sucesso" });
+    res.status(201).send({ msg: "Sensor cadastrado na subcoleção com sucesso" });
   } catch (error) {
     console.error("Erro ao cadastrar ESP:", error);
     res.status(400).send({ error: error.message });
   }
 });
+
 
 // Receber evento do ESP e enviar notificação
 app.post("/esp/event", async (req, res) => {
