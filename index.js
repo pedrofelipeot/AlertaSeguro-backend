@@ -1,13 +1,24 @@
-// backend.js
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
 
 // =======================
-// Configuração Firebase Admin
+// Configuração Firebase Admin (com variáveis de ambiente)
 // =======================
 
-const serviceAccount = require("./serviceAccountKey.json");
+const serviceAccount = {
+  type: process.env.TYPE,
+  project_id: process.env.PROJECT_ID,
+  private_key_id: process.env.PRIVATE_KEY_ID,
+  private_key: process.env.PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  client_email: process.env.CLIENT_EMAIL,
+  client_id: process.env.CLIENT_ID,
+  auth_uri: process.env.AUTH_URI,
+  token_uri: process.env.TOKEN_URI,
+  auth_provider_x509_cert_url: process.env.AUTH_PROVIDER_X509_CERT_URL,
+  client_x509_cert_url: process.env.CLIENT_X509_CERT_URL,
+  universe_domain: process.env.UNIVERSE_DOMAIN
+};
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -29,7 +40,6 @@ app.use(bodyParser.json());
 app.post("/auth/register", async (req, res) => {
   const { email, password, nome } = req.body;
   try {
-    // Criar usuário no Firebase Auth
     const userRecord = await admin.auth().createUser({
       email,
       password,
@@ -38,7 +48,6 @@ app.post("/auth/register", async (req, res) => {
 
     const uid = userRecord.uid;
 
-    // Criar documento do usuário no Firestore
     await db.collection("users").doc(uid).set({
       email,
       nome,
@@ -52,14 +61,15 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-// Login do usuário
-// Obs: Com Firebase Admin SDK, não tem "signInWithEmailAndPassword"
-// Então o ideal é criar **token custom** ou autenticar direto no frontend
+// Login
 app.post("/auth/login", async (req, res) => {
-  const { uid } = req.body; // você pode enviar o UID do frontend ou usar token custom
+  const { uid } = req.body;
   try {
     const userRecord = await admin.auth().getUser(uid);
-    res.status(200).send({ uid: userRecord.uid, displayName: userRecord.displayName });
+    res.status(200).send({
+      uid: userRecord.uid,
+      displayName: userRecord.displayName
+    });
   } catch (error) {
     res.status(400).send({ error: error.message });
   }
@@ -73,13 +83,11 @@ app.post("/auth/login", async (req, res) => {
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome } = req.body;
   try {
-    // Criar documento do ESP
     await db.collection("espDevices").doc(mac).set({
       userId: uid,
       nome
     });
 
-    // Adicionar MAC ao array do usuário
     const userRef = db.collection("users").doc(uid);
     await userRef.update({
       espDevices: admin.firestore.FieldValue.arrayUnion(mac)
@@ -95,20 +103,20 @@ app.post("/esp/register", async (req, res) => {
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
   try {
-    // Buscar documento do ESP
     const espDoc = await db.collection("espDevices").doc(mac).get();
-    if (!espDoc.exists) return res.status(404).send({ error: "ESP não cadastrado" });
+    if (!espDoc.exists)
+      return res.status(404).send({ error: "ESP não cadastrado" });
 
     const { userId } = espDoc.data();
 
-    // Buscar token do usuário
     const userDoc = await db.collection("users").doc(userId).get();
-    if (!userDoc.exists) return res.status(404).send({ error: "Usuário não encontrado" });
+    if (!userDoc.exists)
+      return res.status(404).send({ error: "Usuário não encontrado" });
 
     const { fcmToken } = userDoc.data();
-    if (!fcmToken) return res.status(400).send({ error: "Usuário não registrou token FCM" });
+    if (!fcmToken)
+      return res.status(400).send({ error: "Usuário não registrou token FCM" });
 
-    // Enviar notificação FCM
     const messageFCM = {
       token: fcmToken,
       notification: {
