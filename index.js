@@ -48,8 +48,6 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// ✅ Permite que o navegador envie requisições OPTIONS automaticamente
-app.options("*", cors());
 
 // ✅ Garante que o corpo JSON será interpretado
 app.use(bodyParser.json());
