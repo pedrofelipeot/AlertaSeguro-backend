@@ -1,21 +1,23 @@
 // =======================
-// index.js - Backend completo (com CORS corrigido)
+// index.js - Backend completo (Firebase + CORS + Render compatível)
 // =======================
 
 require('dotenv').config(); // Carrega variáveis do .env
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
-const cors = require("cors"); // ✅ Importa CORS
+const cors = require("cors");
 
 // =======================
-// Configuração Firebase Admin (com variáveis de ambiente)
+// Verifica se a PRIVATE_KEY existe
 // =======================
-
 if (!process.env.PRIVATE_KEY) {
-  throw new Error("A variável de ambiente PRIVATE_KEY não está definida!");
+  throw new Error("A variável PRIVATE_KEY não está definida!");
 }
 
+// =======================
+// Configuração Firebase Admin
+// =======================
 const serviceAccount = {
   type: process.env.TYPE,
   project_id: process.env.PROJECT_ID,
@@ -27,11 +29,12 @@ const serviceAccount = {
   token_uri: process.env.TOKEN_URI,
   auth_provider_x509_cert_url: process.env.AUTH_PROVIDER_X509_CERT_URL,
   client_x509_cert_url: process.env.CLIENT_X509_CERT_URL,
-  universe_domain: process.env.UNIVERSE_DOMAIN
+  universe_domain: process.env.UNIVERSE_DOMAIN,
 };
 
+// Inicializa o Firebase Admin
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const db = admin.firestore();
@@ -41,15 +44,16 @@ const db = admin.firestore();
 // =======================
 const app = express();
 
-// ✅ Adiciona CORS antes das rotas
+// ✅ CORS configurado (libera localhost e Vercel)
 app.use(cors({
-  origin: ["http://localhost:8100", "https://alertaseguro-frontend.vercel.app"], // adicione outras origens se precisar
+  origin: [
+    "http://localhost:8100",
+    "https://alertaseguro-frontend.vercel.app"
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-
-// ✅ Garante que o corpo JSON será interpretado
 app.use(bodyParser.json());
 
 // Log simples para debug
@@ -69,7 +73,7 @@ app.post("/auth/register", async (req, res) => {
     const userRecord = await admin.auth().createUser({
       email,
       password,
-      displayName: nome
+      displayName: nome,
     });
 
     const uid = userRecord.uid;
@@ -78,7 +82,7 @@ app.post("/auth/register", async (req, res) => {
       email,
       nome,
       fcmToken: "",
-      espDevices: []
+      espDevices: [],
     });
 
     res.status(201).send({ uid });
@@ -95,7 +99,7 @@ app.post("/auth/login", async (req, res) => {
     const userRecord = await admin.auth().getUser(uid);
     res.status(200).send({
       uid: userRecord.uid,
-      displayName: userRecord.displayName
+      displayName: userRecord.displayName,
     });
   } catch (error) {
     console.error("Erro ao logar:", error);
@@ -113,12 +117,12 @@ app.post("/esp/register", async (req, res) => {
   try {
     await db.collection("espDevices").doc(mac).set({
       userId: uid,
-      nome
+      nome,
     });
 
     const userRef = db.collection("users").doc(uid);
     await userRef.update({
-      espDevices: admin.firestore.FieldValue.arrayUnion(mac)
+      espDevices: admin.firestore.FieldValue.arrayUnion(mac),
     });
 
     res.status(201).send({ msg: "ESP cadastrado com sucesso" });
@@ -150,8 +154,8 @@ app.post("/esp/event", async (req, res) => {
       token: fcmToken,
       notification: {
         title: "Alerta de Movimento",
-        body: mensagem
-      }
+        body: mensagem,
+      },
     };
 
     await admin.messaging().send(messageFCM);
