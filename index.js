@@ -80,7 +80,6 @@ app.post("/auth/register", async (req, res) => {
       email,
       nome,
       fcmToken: "",
-      espDevices: [],
     });
 
     res.status(201).send({ uid });
@@ -111,6 +110,27 @@ app.post("/auth/login", async (req, res) => {
     res.status(400).send({ error: error.message });
   }
 });
+
+// =======================
+// Rota para salvar token FCM
+// =======================
+app.post("/api/token", async (req, res) => {
+  const { uid, token } = req.body;
+
+  if (!uid || !token) {
+    return res.status(400).send({ error: "UID e token são obrigatórios" });
+  }
+
+  try {
+    // Atualiza o fcmToken no documento do usuário
+    await db.collection("users").doc(uid).update({ fcmToken: token });
+    res.status(200).send({ msg: "Token FCM salvo com sucesso!" });
+  } catch (error) {
+    console.error("Erro ao salvar token FCM:", error);
+    res.status(400).send({ error: error.message });
+  }
+});
+
 
 // =======================
 // Rotas ESP
