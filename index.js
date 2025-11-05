@@ -54,6 +54,8 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
+app.options('*', cors());
+
 
 app.use(bodyParser.json());
 
@@ -92,9 +94,14 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
+// =======================
+// Rota de teste (para verificar se o backend está acessível)
+// =======================
 app.get("/auth/test", (req, res) => {
   res.status(200).send("Backend acessível com sucesso!");
 });
+
+
 
 
 // Login (recomendado: use Firebase Client SDK no frontend)
