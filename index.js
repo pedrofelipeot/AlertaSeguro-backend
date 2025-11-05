@@ -54,9 +54,6 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.options('/*', cors());
-
-
 app.use(bodyParser.json());
 
 // Log simples para debug
