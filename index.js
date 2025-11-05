@@ -92,6 +92,11 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
+app.get("/auth/test", (req, res) => {
+  res.status(200).send("Backend acessível com sucesso!");
+});
+
+
 // Login (recomendado: use Firebase Client SDK no frontend)
 app.post("/auth/login", async (req, res) => {
   const { email } = req.body;
