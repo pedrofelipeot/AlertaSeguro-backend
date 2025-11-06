@@ -45,14 +45,16 @@ const app = express();
 
 app.use(cors({
   origin: [
-    "http://localhost:8100",       // Dev local web
-    "https://alertaseguro-frontend.vercel.app", // Produção web
+    "http://localhost:8100",       // Dev local web (Ionic serve)
+    "https://localhost",           // App Android com Capacitor
     "capacitor://localhost",       // Android/iOS via Capacitor
-    "ionic://localhost"            // iOS webview
+    "ionic://localhost",           // iOS webview
+    "https://alertaseguro-frontend.vercel.app" // Produção web
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
+
 
 app.use(bodyParser.json());
 
