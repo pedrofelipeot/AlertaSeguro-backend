@@ -158,6 +158,7 @@ app.post("/esp/register", async (req, res) => {
       .doc(mac);
 
     await espRef.set({
+      mac, // 👈 adiciona o campo mac
       nome,
       localizacao,
       tipo,
@@ -177,8 +178,10 @@ app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   try {
-    // Busca o ESP dentro da subcoleção de todos os usuários
-    const espQuery = await db.collectionGroup("espDevices").where("__name__", "==", mac).get();
+    // Busca o ESP dentro da subcoleção de todos os usuários (agora pelo campo 'mac')
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
 
     if (espQuery.empty) {
       return res.status(404).send({ error: "ESP não cadastrado" });
