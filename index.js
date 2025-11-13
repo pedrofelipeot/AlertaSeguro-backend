@@ -1,5 +1,5 @@
 // =======================
-// index.js - Backend completo (Firebase + CORS + Render compatível)
+// index.js - Backend completo (Firebase + ESP + Notificações)
 // =======================
 
 require('dotenv').config();
@@ -55,7 +55,6 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-
 app.use(bodyParser.json());
 
 // Log simples para debug
@@ -93,17 +92,12 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-// =======================
-// Rota de teste (para verificar se o backend está acessível)
-// =======================
+// Teste rápido de backend
 app.get("/auth/test", (req, res) => {
-  res.status(200).send("Backend acessível com sucesso!");
+  res.status(200).send("✅ Backend acessível com sucesso!");
 });
 
-
-
-
-// Login (recomendado: use Firebase Client SDK no frontend)
+// Login (opcional, pois o login deve ser feito via Firebase Client SDK)
 app.post("/auth/login", async (req, res) => {
   const { email } = req.body;
 
@@ -136,21 +130,19 @@ app.post("/api/token", async (req, res) => {
   }
 
   try {
-    // Atualiza o fcmToken no documento do usuário
     await db.collection("users").doc(uid).update({ fcmToken: token });
-    res.status(200).send({ msg: "Token FCM salvo com sucesso!" });
+    res.status(200).send({ msg: "✅ Token FCM salvo com sucesso!" });
   } catch (error) {
     console.error("Erro ao salvar token FCM:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
-
 // =======================
 // Rotas ESP
 // =======================
 
-// Cadastrar ESP corretamente dentro do usuário
+// Cadastrar ESP dentro do usuário (subcoleção)
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
@@ -159,14 +151,12 @@ app.post("/esp/register", async (req, res) => {
   }
 
   try {
-    // Referência da subcoleção do usuário
     const espRef = db
       .collection("users")
       .doc(uid)
       .collection("espDevices")
       .doc(mac);
 
-    // Salva o documento dentro da subcoleção
     await espRef.set({
       nome,
       localizacao,
@@ -175,24 +165,30 @@ app.post("/esp/register", async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.status(201).send({ msg: "Sensor cadastrado na subcoleção com sucesso" });
+    res.status(201).send({ msg: "✅ Sensor cadastrado na subcoleção com sucesso" });
   } catch (error) {
     console.error("Erro ao cadastrar ESP:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
-
-// Receber evento do ESP e enviar notificação
+// Receber evento do ESP e enviar notificação push
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
+
   try {
-    const espDoc = await db.collection("espDevices").doc(mac).get();
-    if (!espDoc.exists)
+    // Busca o ESP dentro da subcoleção de todos os usuários
+    const espQuery = await db.collectionGroup("espDevices").where("__name__", "==", mac).get();
+
+    if (espQuery.empty) {
       return res.status(404).send({ error: "ESP não cadastrado" });
+    }
 
-    const { userId } = espDoc.data();
+    const espDoc = espQuery.docs[0];
+    const espData = espDoc.data();
+    const { userId } = espData;
 
+    // Busca o usuário dono do ESP
     const userDoc = await db.collection("users").doc(userId).get();
     if (!userDoc.exists)
       return res.status(404).send({ error: "Usuário não encontrado" });
@@ -201,16 +197,18 @@ app.post("/esp/event", async (req, res) => {
     if (!fcmToken)
       return res.status(400).send({ error: "Usuário não registrou token FCM" });
 
+    // Envia a notificação push via Firebase
     const messageFCM = {
       token: fcmToken,
       notification: {
-        title: "Alerta de Movimento",
-        body: mensagem,
+        title: "🚨 Alerta de Movimento",
+        body: mensagem || "Movimento detectado pelo sensor!",
       },
     };
 
     await admin.messaging().send(messageFCM);
-    res.status(200).send({ msg: "Notificação enviada" });
+
+    res.status(200).send({ msg: "✅ Notificação enviada com sucesso!" });
   } catch (error) {
     console.error("Erro ao enviar notificação:", error);
     res.status(400).send({ error: error.message });
