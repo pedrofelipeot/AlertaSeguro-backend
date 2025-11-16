@@ -1,6 +1,5 @@
-// =======================
-// index.js - Backend completo (Firebase + ESP + Notificações)
-// =======================
+// index.js - Backend (Firebase + ESP + Notificações)
+// Estrutura: coleção "usuarios" -> subcoleção "esp" -> subcoleções "horarios" e "eventos"
 
 require('dotenv').config();
 const express = require("express");
@@ -9,7 +8,7 @@ const admin = require("firebase-admin");
 const cors = require("cors");
 
 // =======================
-// Verifica se a PRIVATE_KEY existe
+// Validações iniciais
 // =======================
 if (!process.env.PRIVATE_KEY) {
   throw new Error("A variável PRIVATE_KEY não está definida!");
@@ -22,6 +21,7 @@ const serviceAccount = {
   type: process.env.TYPE,
   project_id: process.env.PROJECT_ID,
   private_key_id: process.env.PRIVATE_KEY_ID,
+  // Ajusta quebras de linha que vêm do .env
   private_key: process.env.PRIVATE_KEY.replace(/\\n/g, '\n'),
   client_email: process.env.CLIENT_EMAIL,
   client_id: process.env.CLIENT_ID,
@@ -57,19 +57,50 @@ app.use(cors({
 
 app.use(bodyParser.json());
 
-// Log para debug
+// Log simples de requisições (ajuda a debugar)
 app.use((req, res, next) => {
-  console.log(`[${req.method}] ${req.url} | Body:`, req.body);
+  console.log(`[${req.method}] ${req.url} | Body:`, req.body || {});
   next();
 });
 
 // =======================
-// Auth
+// Helpers
 // =======================
 
-// Registrar usuário
+/**
+ * Encontra o documento "esp" a partir do MAC usando collectionGroup.
+ * Retorna { espRef, ownerId, espData } ou null se não encontrado.
+ */
+async function findEspByMac(mac) {
+  const q = await db.collectionGroup("esp")
+    .where("mac", "==", mac)
+    .limit(1)
+    .get();
+
+  if (q.empty) return null;
+
+  const doc = q.docs[0];
+  // `doc.ref` aponta para /usuarios/{ownerId}/esp/{mac}
+  // ownerId pode ser obtido parseando o path ou lendo um campo ownerId caso tenha.
+  // Vamos extrair o ownerId do path: doc.ref.path -> "usuarios/{ownerId}/esp/{mac}"
+  const pathParts = doc.ref.path.split("/");
+  // pathParts = ["usuarios", "{ownerId}", "esp", "{mac}"]
+  const ownerId = pathParts[1];
+
+  return { espRef: doc.ref, ownerId, espData: doc.data() };
+}
+
+// =======================
+// Auth (Firebase Admin para criar/consultar usuários)
+// =======================
+
+// Registrar usuário (cria no Firebase Auth e cria documento em "usuarios")
 app.post("/auth/register", async (req, res) => {
   const { email, password, nome } = req.body;
+
+  if (!email || !password || !nome)
+    return res.status(400).send({ error: "email, password e nome são obrigatórios" });
+
   try {
     const userRecord = await admin.auth().createUser({
       email,
@@ -77,20 +108,22 @@ app.post("/auth/register", async (req, res) => {
       displayName: nome,
     });
 
-    await db.collection("users").doc(userRecord.uid).set({
+    // Salva no Firestore em "usuarios"
+    await db.collection("usuarios").doc(userRecord.uid).set({
       email,
       nome,
-      fcmToken: "",
+      fcmToken: "", // será atualizado quando o app enviar o token
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    res.status(201).send({ uid: userRecord.uid });
+    return res.status(201).send({ uid: userRecord.uid });
   } catch (error) {
     console.error("Erro ao registrar usuário:", error);
-    res.status(400).send({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 });
 
-// Login
+// Login - retorna UID (a autenticação real pode ficar no frontend com Firebase Auth)
 app.post("/auth/login", async (req, res) => {
   const { email } = req.body;
 
@@ -100,18 +133,18 @@ app.post("/auth/login", async (req, res) => {
   try {
     const userRecord = await admin.auth().getUserByEmail(email);
 
-    res.status(200).send({
+    return res.status(200).send({
       uid: userRecord.uid,
       displayName: userRecord.displayName,
       email: userRecord.email
     });
   } catch (error) {
     console.error("Erro ao logar:", error);
-    res.status(400).send({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 });
 
-// Salvar token FCM
+// Salvar token FCM no documento do usuário (coleção "usuarios")
 app.post("/api/token", async (req, res) => {
   const { uid, token } = req.body;
 
@@ -119,39 +152,45 @@ app.post("/api/token", async (req, res) => {
     return res.status(400).send({ error: "UID e token são obrigatórios" });
 
   try {
-    await db.collection("users").doc(uid).update({ fcmToken: token });
-    res.status(200).send({ msg: "Token salvo com sucesso!" });
+    const userRef = db.collection("usuarios").doc(uid);
+    await userRef.set({ fcmToken: token }, { merge: true });
+    return res.status(200).send({ msg: "Token salvo com sucesso!" });
   } catch (error) {
     console.error("Erro ao salvar token:", error);
-    res.status(400).send({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 });
 
 // =======================
-// ESP
+// ESP - CRUD e listagens
 // =======================
 
-// Listar dispositivos
-app.get("/users/:uid/esp/list", async (req, res) => {
+// Listar dispositivos de um usuário
+app.get("/usuarios/:uid/esp/list", async (req, res) => {
   const { uid } = req.params;
+
+  if (!uid) return res.status(400).send({ error: "UID é obrigatório" });
 
   try {
     const snap = await db
-      .collection("users")
+      .collection("usuarios")
       .doc(uid)
-      .collection("espDevices")
+      .collection("esp")
       .get();
 
-    const lista = snap.docs.map(doc => doc.data());
-    return res.status(200).json(lista);
+    const lista = snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
 
+    return res.status(200).json(lista);
   } catch (error) {
     console.error("Erro ao listar dispositivos:", error);
     return res.status(500).json({ error: "Erro ao listar dispositivos" });
   }
 });
 
-// Cadastrar ESP
+// Cadastrar ESP (salva em usuarios/{uid}/esp/{mac})
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
@@ -160,94 +199,87 @@ app.post("/esp/register", async (req, res) => {
 
   try {
     const espRef = db
-      .collection("users")
+      .collection("usuarios")
       .doc(uid)
-      .collection("espDevices")
+      .collection("esp")
       .doc(mac);
 
+    // Salva ownerId como campo opcional (reduz chamadas para descobrir proprietário)
     await espRef.set({
       mac,
       nome,
       localizacao,
       tipo,
-      userId: uid,
+      ownerId: uid,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    }, { merge: true });
 
-    res.status(201).send({ msg: "Sensor cadastrado com sucesso" });
-
+    return res.status(201).send({ msg: "ESP cadastrado com sucesso!" });
   } catch (error) {
     console.error("Erro ao cadastrar ESP:", error);
-    res.status(400).send({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 });
 
 // =======================
-// HORÁRIOS PROGRAMADOS
+// HORÁRIOS PROGRAMADOS (subcoleção em cada ESP)
 // =======================
 
-// Salvar horário
+// Salvar horário para um ESP identificado pelo MAC
 app.post("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
   const { inicio, fim, dias, ativo } = req.body;
 
-  if (!inicio || !fim || !dias)
+  if (!mac || !inicio || !fim || !dias)
     return res.status(400).send({ error: "Campos obrigatórios ausentes." });
 
   try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    const found = await findEspByMac(mac);
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
+    if (!found) return res.status(404).send({ error: "ESP não encontrado" });
 
-    const espRef = espQuery.docs[0].ref;
+    const { espRef } = found;
 
     await espRef.collection("horarios").add({
       inicio,
       fim,
-      dias,
-      ativo,
+      dias, // array de dias (0-6) ou equivalente que você usa
+      ativo: !!ativo,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
     return res.status(201).send({ msg: "Horário salvo com sucesso!" });
-
   } catch (error) {
     console.error("Erro ao salvar horário:", error);
     return res.status(500).send({ error: "Erro ao salvar horário" });
   }
 });
 
-// Listar horários
+// Listar horários de um ESP (por MAC)
 app.get("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
 
+  if (!mac) return res.status(400).send({ error: "MAC é obrigatório" });
+
   try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    const found = await findEspByMac(mac);
+    if (!found) return res.status(404).send({ error: "ESP não encontrado" });
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
-
-    const espRef = espQuery.docs[0].ref;
+    const { espRef } = found;
 
     const snap = await espRef.collection("horarios").get();
-
     const lista = snap.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
 
     return res.status(200).json(lista);
-
   } catch (error) {
     console.error("Erro ao listar horários:", error);
     return res.status(500).send({ error: "Erro ao listar horários" });
   }
 });
+
 // =======================
 // HISTÓRICO DE EVENTOS DO ESP
 // =======================
@@ -257,15 +289,13 @@ app.post("/esp/:mac/eventos", async (req, res) => {
   const { mac } = req.params;
   const { mensagem } = req.body;
 
+  if (!mac) return res.status(400).send({ error: "MAC é obrigatório" });
+
   try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    const found = await findEspByMac(mac);
+    if (!found) return res.status(404).send({ error: "ESP não encontrado" });
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
-
-    const espRef = espQuery.docs[0].ref;
+    const { espRef } = found;
 
     await espRef.collection("eventos").add({
       mensagem: mensagem || "Evento registrado",
@@ -273,26 +303,23 @@ app.post("/esp/:mac/eventos", async (req, res) => {
     });
 
     return res.status(201).json({ msg: "Evento registrado" });
-
   } catch (error) {
     console.error("Erro ao salvar evento:", error);
     return res.status(500).json({ error: "Erro ao registrar evento" });
   }
 });
 
-// Listar eventos de um ESP
+// Listar eventos de um ESP (por MAC)
 app.get("/esp/:mac/eventos", async (req, res) => {
   const { mac } = req.params;
 
+  if (!mac) return res.status(400).send({ error: "MAC é obrigatório" });
+
   try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    const found = await findEspByMac(mac);
+    if (!found) return res.status(404).send({ error: "ESP não encontrado" });
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
-
-    const espRef = espQuery.docs[0].ref;
+    const { espRef } = found;
 
     const snap = await espRef.collection("eventos")
       .orderBy("timestamp", "desc")
@@ -305,7 +332,6 @@ app.get("/esp/:mac/eventos", async (req, res) => {
     }));
 
     return res.status(200).json(eventos);
-
   } catch (error) {
     console.error("Erro ao listar eventos:", error);
     return res.status(500).json({ error: "Erro ao listar eventos" });
@@ -313,54 +339,50 @@ app.get("/esp/:mac/eventos", async (req, res) => {
 });
 
 // =======================
-// EVENTO DO ESP
+// ROTA PRINCIPAL RECEBENDO EVENTOS DO ESP (identificado por MAC)
+// Verifica horários, registra evento e envia notificação
 // =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
+  if (!mac) return res.status(400).send({ error: "MAC é obrigatório" });
+
   try {
-    // Buscar ESP
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    // 1) Buscar ESP e o owner
+    const found = await findEspByMac(mac);
+    if (!found) return res.status(404).send({ error: "ESP não cadastrado" });
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não cadastrado" });
+    const { espRef, ownerId } = found;
 
-    const espDoc = espQuery.docs[0];
-    const espRef = espDoc.ref;
-    const { userId } = espDoc.data();
-
-    // Buscar horários
+    // 2) Buscar horários do ESP
     const horariosSnap = await espRef.collection("horarios").get();
     const horarios = horariosSnap.docs.map(d => d.data());
 
     if (horarios.length === 0) {
       console.log("⚠ Sem horários programados. Notificação não enviada.");
+      // Ainda registramos o evento? Neste caso original você não registra se sem horário.
       return res.status(200).send({ msg: "Sem horários ativos" });
     }
 
-    // ================================
-    // 🔥 Ajuste de fuso horário UTC → UTC-3 (Brasil)
-    // ================================
+    // 3) Calcular horário atual no fuso BR (UTC-3)
     const agora = new Date();
-    agora.setHours(agora.getHours() - 3); // <-- chave da correção!
+    // atenção: serverTimestamp é UTC; aqui ajustamos para UTC-3
+    const agoraBR = new Date(agora.getTime() - (3 * 60 * 60 * 1000));
+    const diaSemana = agoraBR.getDay(); // 0 (domingo) - 6 (sábado)
+    const horaAtual = agoraBR.toTimeString().slice(0, 5); // "HH:MM"
 
-    const diaSemana = agora.getDay();
-    const horaAtual = agora.toTimeString().slice(0, 5);
-
-    console.log("📅 Dia atual:", diaSemana);
-    console.log("⏰ Hora atual BR:", horaAtual);
+    console.log("📅 Dia atual (BR):", diaSemana);
+    console.log("⏰ Hora atual (BR):", horaAtual);
 
     let permitido = false;
 
     for (const h of horarios) {
       if (!h.ativo) continue;
 
-      // Dia
-      if (!h.dias.includes(diaSemana)) continue;
+      // espera-se que h.dias seja um array com números 0-6
+      if (!Array.isArray(h.dias) || !h.dias.includes(diaSemana)) continue;
 
-      // Hora
+      // compara strings "HH:MM" (funciona porque formato é zero-padded)
       if (horaAtual >= h.inicio && horaAtual <= h.fim) {
         permitido = true;
         break;
@@ -372,20 +394,28 @@ app.post("/esp/event", async (req, res) => {
       return res.status(200).send({ msg: "Evento ignorado (fora do horário)" });
     }
 
-    // Buscar token do usuário
-    const userDoc = await db.collection("users").doc(userId).get();
-    const { fcmToken } = userDoc.data();
+    // 4) Buscar token FCM do usuário proprietário
+    const userDocSnap = await db.collection("usuarios").doc(ownerId).get();
+    if (!userDocSnap.exists) {
+      console.error("Usuário dono do ESP não encontrado:", ownerId);
+      return res.status(404).send({ error: "Usuário dono do ESP não encontrado" });
+    }
 
-    if (!fcmToken)
+    const userData = userDocSnap.data();
+    const fcmToken = userData?.fcmToken;
+
+    if (!fcmToken) {
+      console.error("Token FCM ausente para o usuário:", ownerId);
       return res.status(400).send({ error: "Token FCM ausente" });
+    }
 
-    
-    // Registrar evento no histórico
-await espRef.collection("eventos").add({
-  mensagem: mensagem || "Movimento detectado!",
-  timestamp: admin.firestore.FieldValue.serverTimestamp()
-});
-// Enviar notificação
+    // 5) Registrar evento no histórico do ESP
+    await espRef.collection("eventos").add({
+      mensagem: mensagem || "Movimento detectado!",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // 6) Enviar notificação via Firebase Cloud Messaging
     await admin.messaging().send({
       token: fcmToken,
       notification: {
@@ -395,7 +425,6 @@ await espRef.collection("eventos").add({
     });
 
     return res.status(200).send({ msg: "Notificação enviada!" });
-
   } catch (error) {
     console.error("Erro ao processar evento:", error);
     return res.status(400).send({ error: error.message });
