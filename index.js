@@ -272,42 +272,78 @@ app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   try {
+    // 1. Buscar ESP pelo mac
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
 
-    if (espQuery.empty) {
+    if (espQuery.empty)
       return res.status(404).send({ error: "ESP não cadastrado" });
-    }
 
     const espDoc = espQuery.docs[0];
-    const espData = espDoc.data();
-    const { userId } = espData;
+    const espRef = espDoc.ref;
+    const { userId } = espDoc.data();
 
+    // 2. Buscar horários programados
+    const horariosSnap = await espRef.collection("horarios").get();
+    const horarios = horariosSnap.docs.map(d => d.data());
+
+    if (horarios.length === 0) {
+      console.log("⚠ Sem horários programados. Não enviar notificação.");
+      return res.status(200).send({ msg: "Sem horários ativos" });
+    }
+
+    // 3. Verificar dia e hora atual
+    const agora = new Date();
+    const diaSemana = agora.getDay(); // 0 = domingo
+    const horaAtual = agora.toTimeString().slice(0, 5); // "HH:MM"
+
+    let permitido = false;
+
+    for (const h of horarios) {
+      if (!h.ativo) continue;
+
+      // Verifica dia
+      if (!h.dias.includes(diaSemana)) continue;
+
+      // Verifica horário
+      if (horaAtual >= h.inicio && horaAtual <= h.fim) {
+        permitido = true;
+        break;
+      }
+    }
+
+    if (!permitido) {
+      console.log("⛔ Evento fora do horário ou dia. Notificação bloqueada.");
+      return res.status(200).send({ msg: "Evento ignorado (fora do horário)" });
+    }
+
+    // 4. Buscar Token FCM
     const userDoc = await db.collection("users").doc(userId).get();
-    if (!userDoc.exists)
-      return res.status(404).send({ error: "Usuário não encontrado" });
-
     const { fcmToken } = userDoc.data();
+
     if (!fcmToken)
       return res.status(400).send({ error: "Usuário não registrou token FCM" });
 
+    // 5. Enviar notificação
     const messageFCM = {
       token: fcmToken,
       notification: {
         title: "🚨 Alerta de Movimento",
-        body: mensagem || "Movimento detectado pelo sensor!",
+        body: mensagem || "Movimento detectado!",
       },
     };
 
     await admin.messaging().send(messageFCM);
 
-    res.status(200).send({ msg: "✅ Notificação enviada com sucesso!" });
+    return res.status(200).send({ msg: "Notificação enviada!" });
+
   } catch (error) {
     console.error("Erro ao enviar notificação:", error);
-    res.status(400).send({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 });
+
 
 // =======================
 // Iniciar servidor
