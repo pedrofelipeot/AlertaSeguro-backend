@@ -248,6 +248,69 @@ app.get("/esp/:mac/horarios", async (req, res) => {
     return res.status(500).send({ error: "Erro ao listar horários" });
   }
 });
+// =======================
+// HISTÓRICO DE EVENTOS DO ESP
+// =======================
+
+// Registrar evento manualmente (apenas histórico)
+app.post("/esp/:mac/eventos", async (req, res) => {
+  const { mac } = req.params;
+  const { mensagem } = req.body;
+
+  try {
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
+
+    if (espQuery.empty)
+      return res.status(404).send({ error: "ESP não encontrado" });
+
+    const espRef = espQuery.docs[0].ref;
+
+    await espRef.collection("eventos").add({
+      mensagem: mensagem || "Evento registrado",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return res.status(201).json({ msg: "Evento registrado" });
+
+  } catch (error) {
+    console.error("Erro ao salvar evento:", error);
+    return res.status(500).json({ error: "Erro ao registrar evento" });
+  }
+});
+
+// Listar eventos de um ESP
+app.get("/esp/:mac/eventos", async (req, res) => {
+  const { mac } = req.params;
+
+  try {
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
+
+    if (espQuery.empty)
+      return res.status(404).send({ error: "ESP não encontrado" });
+
+    const espRef = espQuery.docs[0].ref;
+
+    const snap = await espRef.collection("eventos")
+      .orderBy("timestamp", "desc")
+      .limit(50)
+      .get();
+
+    const eventos = snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    return res.status(200).json(eventos);
+
+  } catch (error) {
+    console.error("Erro ao listar eventos:", error);
+    return res.status(500).json({ error: "Erro ao listar eventos" });
+  }
+});
 
 // =======================
 // EVENTO DO ESP
@@ -316,7 +379,13 @@ app.post("/esp/event", async (req, res) => {
     if (!fcmToken)
       return res.status(400).send({ error: "Token FCM ausente" });
 
-    // Enviar notificação
+    
+    // Registrar evento no histórico
+await espRef.collection("eventos").add({
+  mensagem: mensagem || "Movimento detectado!",
+  timestamp: admin.firestore.FieldValue.serverTimestamp()
+});
+// Enviar notificação
     await admin.messaging().send({
       token: fcmToken,
       notification: {
