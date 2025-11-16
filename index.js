@@ -249,9 +249,33 @@ app.get("/esp/:mac/horarios", async (req, res) => {
   }
 });
 
-// =======================
-// EVENTO DO ESP
-// =======================
+// 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
+app.get("/esp/events/:userId/:mac", async (req, res) => {
+  const { userId, mac } = req.params;
+
+  try {
+    const eventsRef = db
+      .collection("users")
+      .doc(userId)
+      .collection("espDevices")
+      .doc(mac)
+      .collection("events")
+      .orderBy("createdAt", "desc");
+
+    const snapshot = await eventsRef.get();
+
+    const events = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return res.status(200).json(events);
+  } catch (error) {
+    console.error("Erro ao buscar eventos:", error);
+    return res.status(500).json({ error: "Erro ao buscar eventos" });
+  }
+});
+
 // =======================
 // EVENTO DO ESP
 // =======================
