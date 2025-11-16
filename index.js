@@ -57,14 +57,14 @@ app.use(cors({
 
 app.use(bodyParser.json());
 
-// Log simples para debug
+// Log para debug
 app.use((req, res, next) => {
   console.log(`[${req.method}] ${req.url} | Body:`, req.body);
   next();
 });
 
 // =======================
-// Rotas Auth
+// Auth
 // =======================
 
 // Registrar usuário
@@ -77,33 +77,25 @@ app.post("/auth/register", async (req, res) => {
       displayName: nome,
     });
 
-    const uid = userRecord.uid;
-
-    await db.collection("users").doc(uid).set({
+    await db.collection("users").doc(userRecord.uid).set({
       email,
       nome,
       fcmToken: "",
     });
 
-    res.status(201).send({ uid });
+    res.status(201).send({ uid: userRecord.uid });
   } catch (error) {
     console.error("Erro ao registrar usuário:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
-// Teste rápido de backend
-app.get("/auth/test", (req, res) => {
-  res.status(200).send("✅ Backend acessível com sucesso!");
-});
-
 // Login
 app.post("/auth/login", async (req, res) => {
   const { email } = req.body;
 
-  if (!email) {
+  if (!email)
     return res.status(400).send({ error: "O email é obrigatório" });
-  }
 
   try {
     const userRecord = await admin.auth().getUserByEmail(email);
@@ -119,28 +111,27 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
-// =======================
-// Rota para salvar token FCM
-// =======================
+// Salvar token FCM
 app.post("/api/token", async (req, res) => {
   const { uid, token } = req.body;
 
-  if (!uid || !token) {
+  if (!uid || !token)
     return res.status(400).send({ error: "UID e token são obrigatórios" });
-  }
 
   try {
     await db.collection("users").doc(uid).update({ fcmToken: token });
-    res.status(200).send({ msg: "✅ Token FCM salvo com sucesso!" });
+    res.status(200).send({ msg: "Token salvo com sucesso!" });
   } catch (error) {
-    console.error("Erro ao salvar token FCM:", error);
+    console.error("Erro ao salvar token:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
 // =======================
-// LISTAR ESPS DE UM USUÁRIO
+// ESP
 // =======================
+
+// Listar dispositivos
 app.get("/users/:uid/esp/list", async (req, res) => {
   const { uid } = req.params;
 
@@ -152,25 +143,20 @@ app.get("/users/:uid/esp/list", async (req, res) => {
       .get();
 
     const lista = snap.docs.map(doc => doc.data());
-
     return res.status(200).json(lista);
+
   } catch (error) {
     console.error("Erro ao listar dispositivos:", error);
     return res.status(500).json({ error: "Erro ao listar dispositivos" });
   }
 });
 
-// =======================
-// Rotas ESP
-// =======================
-
-// Cadastrar ESP dentro do usuário
+// Cadastrar ESP
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
-  if (!uid || !mac || !nome) {
+  if (!uid || !mac || !nome)
     return res.status(400).send({ error: "UID, MAC e nome são obrigatórios" });
-  }
 
   try {
     const espRef = db
@@ -188,26 +174,27 @@ app.post("/esp/register", async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.status(201).send({ msg: "✅ Sensor cadastrado na subcoleção com sucesso" });
+    res.status(201).send({ msg: "Sensor cadastrado com sucesso" });
+
   } catch (error) {
     console.error("Erro ao cadastrar ESP:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
-// ================================
-// 📌 SALVAR HORÁRIOS PROGRAMADOS
-// ================================
+// =======================
+// HORÁRIOS PROGRAMADOS
+// =======================
+
+// Salvar horário
 app.post("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
   const { inicio, fim, dias, ativo } = req.body;
 
-  if (!inicio || !fim || !dias) {
+  if (!inicio || !fim || !dias)
     return res.status(400).send({ error: "Campos obrigatórios ausentes." });
-  }
 
   try {
-    // buscar ESP pelo mac
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
@@ -217,7 +204,6 @@ app.post("/esp/:mac/horarios", async (req, res) => {
 
     const espRef = espQuery.docs[0].ref;
 
-    // salvar subcoleção "horarios"
     await espRef.collection("horarios").add({
       inicio,
       fim,
@@ -226,7 +212,7 @@ app.post("/esp/:mac/horarios", async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    return res.status(201).send({ msg: "⏰ Horário salvo com sucesso!" });
+    return res.status(201).send({ msg: "Horário salvo com sucesso!" });
 
   } catch (error) {
     console.error("Erro ao salvar horário:", error);
@@ -234,9 +220,7 @@ app.post("/esp/:mac/horarios", async (req, res) => {
   }
 });
 
-// ================================
-// 📌 LISTAR HORÁRIOS PROGRAMADOS
-// ================================
+// Listar horários
 app.get("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
 
@@ -266,13 +250,13 @@ app.get("/esp/:mac/horarios", async (req, res) => {
 });
 
 // =======================
-// Receber evento do ESP e enviar notificação
+// EVENTO DO ESP
 // =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   try {
-    // 1. Buscar ESP pelo mac
+    // Buscar ESP
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
@@ -284,29 +268,36 @@ app.post("/esp/event", async (req, res) => {
     const espRef = espDoc.ref;
     const { userId } = espDoc.data();
 
-    // 2. Buscar horários programados
+    // Buscar horários
     const horariosSnap = await espRef.collection("horarios").get();
     const horarios = horariosSnap.docs.map(d => d.data());
 
     if (horarios.length === 0) {
-      console.log("⚠ Sem horários programados. Não enviar notificação.");
+      console.log("⚠ Sem horários programados. Notificação não enviada.");
       return res.status(200).send({ msg: "Sem horários ativos" });
     }
 
-    // 3. Verificar dia e hora atual
+    // ================================
+    // 🔥 Ajuste de fuso horário UTC → UTC-3 (Brasil)
+    // ================================
     const agora = new Date();
-    const diaSemana = agora.getDay(); // 0 = domingo
-    const horaAtual = agora.toTimeString().slice(0, 5); // "HH:MM"
+    agora.setHours(agora.getHours() - 3); // <-- chave da correção!
+
+    const diaSemana = agora.getDay();
+    const horaAtual = agora.toTimeString().slice(0, 5);
+
+    console.log("📅 Dia atual:", diaSemana);
+    console.log("⏰ Hora atual BR:", horaAtual);
 
     let permitido = false;
 
     for (const h of horarios) {
       if (!h.ativo) continue;
 
-      // Verifica dia
+      // Dia
       if (!h.dias.includes(diaSemana)) continue;
 
-      // Verifica horário
+      // Hora
       if (horaAtual >= h.inicio && horaAtual <= h.fim) {
         permitido = true;
         break;
@@ -314,39 +305,36 @@ app.post("/esp/event", async (req, res) => {
     }
 
     if (!permitido) {
-      console.log("⛔ Evento fora do horário ou dia. Notificação bloqueada.");
+      console.log("⛔ Evento ignorado (fora do horário/dia)");
       return res.status(200).send({ msg: "Evento ignorado (fora do horário)" });
     }
 
-    // 4. Buscar Token FCM
+    // Buscar token do usuário
     const userDoc = await db.collection("users").doc(userId).get();
     const { fcmToken } = userDoc.data();
 
     if (!fcmToken)
-      return res.status(400).send({ error: "Usuário não registrou token FCM" });
+      return res.status(400).send({ error: "Token FCM ausente" });
 
-    // 5. Enviar notificação
-    const messageFCM = {
+    // Enviar notificação
+    await admin.messaging().send({
       token: fcmToken,
       notification: {
         title: "🚨 Alerta de Movimento",
-        body: mensagem || "Movimento detectado!",
-      },
-    };
-
-    await admin.messaging().send(messageFCM);
+        body: mensagem || "Movimento detectado!"
+      }
+    });
 
     return res.status(200).send({ msg: "Notificação enviada!" });
 
   } catch (error) {
-    console.error("Erro ao enviar notificação:", error);
+    console.error("Erro ao processar evento:", error);
     return res.status(400).send({ error: error.message });
   }
 });
 
-
 // =======================
-// Iniciar servidor
+// Inicializar servidor
 // =======================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
