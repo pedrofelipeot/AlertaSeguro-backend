@@ -45,11 +45,11 @@ const app = express();
 
 app.use(cors({
   origin: [
-    "http://localhost:8100",       // Dev local web (Ionic serve)
-    "https://localhost",           // App Android com Capacitor
-    "capacitor://localhost",       // Android/iOS via Capacitor
-    "ionic://localhost",           // iOS webview
-    "https://alertaseguro-frontend.vercel.app" // Produção web
+    "http://localhost:8100",
+    "https://localhost",
+    "capacitor://localhost",
+    "ionic://localhost",
+    "https://alertaseguro-frontend.vercel.app"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -97,7 +97,7 @@ app.get("/auth/test", (req, res) => {
   res.status(200).send("✅ Backend acessível com sucesso!");
 });
 
-// Login (opcional, pois o login deve ser feito via Firebase Client SDK)
+// Login
 app.post("/auth/login", async (req, res) => {
   const { email } = req.body;
 
@@ -139,10 +139,32 @@ app.post("/api/token", async (req, res) => {
 });
 
 // =======================
+// LISTAR ESPS DE UM USUÁRIO
+// =======================
+app.get("/users/:uid/esp/list", async (req, res) => {
+  const { uid } = req.params;
+
+  try {
+    const snap = await db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .get();
+
+    const lista = snap.docs.map(doc => doc.data());
+
+    return res.status(200).json(lista);
+  } catch (error) {
+    console.error("Erro ao listar dispositivos:", error);
+    return res.status(500).json({ error: "Erro ao listar dispositivos" });
+  }
+});
+
+// =======================
 // Rotas ESP
 // =======================
 
-// Cadastrar ESP dentro do usuário (subcoleção)
+// Cadastrar ESP dentro do usuário
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
@@ -158,7 +180,7 @@ app.post("/esp/register", async (req, res) => {
       .doc(mac);
 
     await espRef.set({
-      mac, // 👈 adiciona o campo mac
+      mac,
       nome,
       localizacao,
       tipo,
@@ -173,12 +195,83 @@ app.post("/esp/register", async (req, res) => {
   }
 });
 
-// Receber evento do ESP e enviar notificação push
+// ================================
+// 📌 SALVAR HORÁRIOS PROGRAMADOS
+// ================================
+app.post("/esp/:mac/horarios", async (req, res) => {
+  const { mac } = req.params;
+  const { inicio, fim, dias, ativo } = req.body;
+
+  if (!inicio || !fim || !dias) {
+    return res.status(400).send({ error: "Campos obrigatórios ausentes." });
+  }
+
+  try {
+    // buscar ESP pelo mac
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
+
+    if (espQuery.empty)
+      return res.status(404).send({ error: "ESP não encontrado" });
+
+    const espRef = espQuery.docs[0].ref;
+
+    // salvar subcoleção "horarios"
+    await espRef.collection("horarios").add({
+      inicio,
+      fim,
+      dias,
+      ativo,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return res.status(201).send({ msg: "⏰ Horário salvo com sucesso!" });
+
+  } catch (error) {
+    console.error("Erro ao salvar horário:", error);
+    return res.status(500).send({ error: "Erro ao salvar horário" });
+  }
+});
+
+// ================================
+// 📌 LISTAR HORÁRIOS PROGRAMADOS
+// ================================
+app.get("/esp/:mac/horarios", async (req, res) => {
+  const { mac } = req.params;
+
+  try {
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
+
+    if (espQuery.empty)
+      return res.status(404).send({ error: "ESP não encontrado" });
+
+    const espRef = espQuery.docs[0].ref;
+
+    const snap = await espRef.collection("horarios").get();
+
+    const lista = snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    return res.status(200).json(lista);
+
+  } catch (error) {
+    console.error("Erro ao listar horários:", error);
+    return res.status(500).send({ error: "Erro ao listar horários" });
+  }
+});
+
+// =======================
+// Receber evento do ESP e enviar notificação
+// =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   try {
-    // Busca o ESP dentro da subcoleção de todos os usuários (agora pelo campo 'mac')
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
@@ -191,7 +284,6 @@ app.post("/esp/event", async (req, res) => {
     const espData = espDoc.data();
     const { userId } = espData;
 
-    // Busca o usuário dono do ESP
     const userDoc = await db.collection("users").doc(userId).get();
     if (!userDoc.exists)
       return res.status(404).send({ error: "Usuário não encontrado" });
@@ -200,7 +292,6 @@ app.post("/esp/event", async (req, res) => {
     if (!fcmToken)
       return res.status(400).send({ error: "Usuário não registrou token FCM" });
 
-    // Envia a notificação push via Firebase
     const messageFCM = {
       token: fcmToken,
       notification: {
