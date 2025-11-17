@@ -302,87 +302,64 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
 // =======================
 // EVENTO DO ESP
 // =======================
-// =======================
-// EVENTO DO ESP - AJUSTADO
-// =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
+  if (!mac || !mensagem) {
+    return res.status(400).json({ error: "MAC e mensagem são obrigatórios" });
+  }
+
   try {
-    // Buscar ESP
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    // Buscar qual usuário possui esse MAC
+    const usersRef = db.collection("users");
+    const usersSnapshot = await usersRef.get();
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não cadastrado" });
+    let userId = null;
+    let deviceName = "Desconhecido";
 
-    const espDoc = espQuery.docs[0];
-    const espRef = espDoc.ref;
-    const { userId } = espDoc.data();
+    for (const userDoc of usersSnapshot.docs) {
+      const espDevicesRef = userDoc.ref.collection("espDevices");
+      const espSnapshot = await espDevicesRef.where("mac", "==", mac).get();
 
-    // Buscar horários programados
-    const horariosSnap = await espRef.collection("horarios").get();
-    const horarios = horariosSnap.docs.map(d => d.data());
-
-    if (horarios.length === 0) {
-      console.log("⚠ Sem horários programados. Evento não será salvo.");
-      return res.status(200).send({ msg: "Evento ignorado (sem horários programados)" });
-    }
-
-    // Ajuste horário Brasil
-    const agora = new Date();
-    agora.setHours(agora.getHours() - 3); // UTC-3
-    const diaSemana = agora.getDay();
-    const horaAtual = agora.toTimeString().slice(0, 5); // "HH:MM"
-
-    let permitido = false;
-
-    for (const h of horarios) {
-      if (!h.ativo) continue;
-      if (!h.dias.includes(diaSemana)) continue;
-      if (horaAtual >= h.inicio && horaAtual <= h.fim) {
-        permitido = true;
+      if (!espSnapshot.empty) {
+        userId = userDoc.id;
+        deviceName = espSnapshot.docs[0].data().nome || "Sem nome";
         break;
       }
     }
 
-    if (!permitido) {
-      console.log("⛔ Evento ignorado (fora do horário/dia)");
-      return res.status(200).send({ msg: "Evento ignorado (fora do horário/dia)" });
+    if (!userId) {
+      return res.status(404).json({ error: "Dispositivo não encontrado" });
     }
 
-    // Salvar evento no Firestore
-    await espRef.collection("events").add({
-      mensagem,
-      data: agora.toLocaleDateString("pt-BR"),
-      hora: agora.toLocaleTimeString("pt-BR"),
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    const agora = new Date();
 
-    // Buscar token do usuário
-    const userDoc = await db.collection("users").doc(userId).get();
-    const { fcmToken } = userDoc.data();
+    // 🔥 Mensagem formatada do JEITO QUE VOCÊ PEDIU:
+    const mensagemFinal = `${deviceName}: ${mensagem}`;
 
-    if (!fcmToken)
-      return res.status(400).send({ error: "Token FCM ausente" });
+    // Salvar o evento
+    await db
+      .collection("users")
+      .doc(userId)
+      .collection("espDevices")
+      .doc(mac)
+      .collection("events")
+      .add({
+        mensagem: mensagemFinal,
+        deviceName,
+        data: agora.toLocaleDateString("pt-BR"),
+        hora: agora.toLocaleTimeString("pt-BR"),
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
 
-    // Enviar notificação
-    await admin.messaging().send({
-      token: fcmToken,
-      notification: {
-        title: "🚨 Alerta de Movimento",
-        body: mensagem || "Movimento detectado!"
-      }
-    });
-
-    return res.status(200).send({ msg: "Evento salvo e notificação enviada!" });
+    res.json({ success: true });
 
   } catch (error) {
-    console.error("Erro ao processar evento:", error);
-    return res.status(400).send({ error: error.message });
+    console.error("Erro ao salvar evento:", error);
+    res.status(500).json({ error: "Erro interno do servidor" });
   }
 });
+
 
 
 
