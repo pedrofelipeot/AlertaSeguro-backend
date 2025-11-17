@@ -302,6 +302,9 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
 // =======================
 // EVENTO DO ESP
 // =======================
+// =======================
+// EVENTO DO ESP - AJUSTADO
+// =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
@@ -318,30 +321,20 @@ app.post("/esp/event", async (req, res) => {
     const espRef = espDoc.ref;
     const { userId } = espDoc.data();
 
-    // Buscar horários
+    // Buscar horários programados
     const horariosSnap = await espRef.collection("horarios").get();
     const horarios = horariosSnap.docs.map(d => d.data());
 
     if (horarios.length === 0) {
-      console.log("⚠ Sem horários programados. Notificação não enviada.");
-      
-      // 🎯 Mesmo sem horário → ainda assim salva o evento
-      await espRef.collection("events").add({
-        mensagem,
-        data: new Date().toLocaleDateString("pt-BR"),
-        hora: new Date().toLocaleTimeString("pt-BR"),
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      return res.status(200).send({ msg: "Evento salvo sem notificação (sem horários)" });
+      console.log("⚠ Sem horários programados. Evento não será salvo.");
+      return res.status(200).send({ msg: "Evento ignorado (sem horários programados)" });
     }
 
     // Ajuste horário Brasil
     const agora = new Date();
-    agora.setHours(agora.getHours() - 3);
-
+    agora.setHours(agora.getHours() - 3); // UTC-3
     const diaSemana = agora.getDay();
-    const horaAtual = agora.toTimeString().slice(0, 5);
+    const horaAtual = agora.toTimeString().slice(0, 5); // "HH:MM"
 
     let permitido = false;
 
@@ -354,18 +347,18 @@ app.post("/esp/event", async (req, res) => {
       }
     }
 
-    // Sempre salvar evento!
-    await espRef.collection("events").add({
-      mensagem,
-      data: new Date().toLocaleDateString("pt-BR"),
-      hora: new Date().toLocaleTimeString("pt-BR"),
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
     if (!permitido) {
       console.log("⛔ Evento ignorado (fora do horário/dia)");
-      return res.status(200).send({ msg: "Evento salvo, mas notificação ignorada (fora do horário)" });
+      return res.status(200).send({ msg: "Evento ignorado (fora do horário/dia)" });
     }
+
+    // Salvar evento no Firestore
+    await espRef.collection("events").add({
+      mensagem,
+      data: agora.toLocaleDateString("pt-BR"),
+      hora: agora.toLocaleTimeString("pt-BR"),
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
     // Buscar token do usuário
     const userDoc = await db.collection("users").doc(userId).get();
@@ -390,6 +383,7 @@ app.post("/esp/event", async (req, res) => {
     return res.status(400).send({ error: error.message });
   }
 });
+
 
 
 // =======================
