@@ -254,11 +254,14 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
   try {
+    // 🔹 Decodifica o MAC
+    const decodedMac = decodeURIComponent(mac);
+
     const eventsRef = db
       .collection("users")
       .doc(userId)
       .collection("espDevices")
-      .doc(mac)
+      .doc(decodedMac) // usa o MAC decodificado
       .collection("events")
       .orderBy("createdAt", "desc");
 
@@ -275,6 +278,7 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
     return res.status(500).json({ error: "Erro ao buscar eventos" });
   }
 });
+
 
 // =======================
 // EVENTO DO ESP
