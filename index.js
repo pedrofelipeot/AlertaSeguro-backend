@@ -300,7 +300,7 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
 
 
 // =======================
-// EVENTO DO ESP
+// EVENTO DO ESP (COM NOTIFICAÇÃO)
 // =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
@@ -332,12 +332,11 @@ app.post("/esp/event", async (req, res) => {
       return res.status(404).json({ error: "Dispositivo não encontrado" });
     }
 
-    const agora = new Date();
-
-    // 🔥 Mensagem formatada do JEITO QUE VOCÊ PEDIU:
     const mensagemFinal = `${deviceName}: ${mensagem}`;
 
-    // Salvar o evento
+    // ===========================
+    // 1. Salvar evento
+    // ===========================
     await db
       .collection("users")
       .doc(userId)
@@ -347,21 +346,44 @@ app.post("/esp/event", async (req, res) => {
       .add({
         mensagem: mensagemFinal,
         deviceName,
-        data: agora.toLocaleDateString("pt-BR"),
-        hora: agora.toLocaleTimeString("pt-BR"),
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-    res.json({ success: true });
+    // ===========================
+    // 2. Buscar token FCM do usuário
+    // ===========================
+    const userDoc = await db.collection("users").doc(userId).get();
+    const fcmToken = userDoc.data().fcmToken;
+
+    if (!fcmToken) {
+      console.warn("⚠ Usuário sem token FCM cadastrado!");
+      return res.json({ success: true, warning: "Usuário sem token FCM" });
+    }
+
+    // ===========================
+    // 3. Enviar notificação FCM
+    // ===========================
+    await admin.messaging().send({
+      token: fcmToken,
+      notification: {
+        title: "Alerta Seguro",
+        body: mensagemFinal,
+      },
+      data: {
+        mac,
+        mensagem: mensagemFinal
+      }
+    });
+
+    console.log("📩 Notificação enviada para:", fcmToken);
+
+    return res.json({ success: true, notified: true });
 
   } catch (error) {
     console.error("Erro ao salvar evento:", error);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 });
-
-
-
 
 // =======================
 // Inicializar servidor
