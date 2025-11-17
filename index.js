@@ -254,23 +254,42 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
   try {
-    // 🔹 Decodifica o MAC
+    // 🔹 Decodifica o MAC da URL
     const decodedMac = decodeURIComponent(mac);
 
     const eventsRef = db
       .collection("users")
       .doc(userId)
       .collection("espDevices")
-      .doc(decodedMac) // usa o MAC decodificado
+      .doc(decodedMac)
       .collection("events")
       .orderBy("createdAt", "desc");
 
     const snapshot = await eventsRef.get();
 
-    const events = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const events = snapshot.docs.map((doc) => {
+      const data = doc.data();
+
+      // JS puro: sem anotação de tipo
+      let dataLocal = { ...data };
+
+      if (data.createdAt && data.createdAt._seconds) {
+        // converte timestamp Firestore para Date
+        const date = new Date(data.createdAt._seconds * 1000);
+
+        // 🔹 Ajuste para horário de Brasília (UTC-3)
+        date.setHours(date.getHours() - 3);
+
+        // adiciona campos já formatados para frontend
+        dataLocal.data = date.toLocaleDateString('pt-BR'); // dd/mm/yyyy
+        dataLocal.hora = date.toLocaleTimeString('pt-BR', { hour12: false }); // HH:MM:SS
+      }
+
+      return {
+        id: doc.id,
+        ...dataLocal,
+      };
+    });
 
     return res.status(200).json(events);
   } catch (error) {
