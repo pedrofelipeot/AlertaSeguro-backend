@@ -220,6 +220,38 @@ app.post("/esp/:mac/horarios", async (req, res) => {
   }
 });
 
+// Listar horários do ESP
+app.get("/esp/:mac/horarios", async (req, res) => {
+  const { mac } = req.params;
+
+  try {
+    const espQuery = await db.collectionGroup("espDevices")
+      .where("mac", "==", mac)
+      .get();
+
+    if (espQuery.empty)
+      return res.status(404).send({ error: "ESP não encontrado" });
+
+    const espRef = espQuery.docs[0].ref;
+
+    const horariosSnap = await espRef.collection("horarios")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const horarios = horariosSnap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    return res.status(200).send(horarios);
+
+  } catch (error) {
+    console.error("Erro ao listar horários:", error);
+    return res.status(500).send({ error: "Erro ao listar horários" });
+  }
+});
+
+
 // Listar horários
 app.get("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
