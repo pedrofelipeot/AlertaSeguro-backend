@@ -219,65 +219,36 @@ app.post("/esp/:mac/horarios", async (req, res) => {
     return res.status(500).send({ error: "Erro ao salvar horário" });
   }
 });
-
 // Listar horários do ESP
 app.get("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
 
   try {
+    // Busca o ESP pela MAC
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
 
     if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
+      return res.status(404).json({ error: "ESP não encontrado" });
 
     const espRef = espQuery.docs[0].ref;
 
-    const horariosSnap = await espRef.collection("horarios")
-      .orderBy("createdAt", "desc")
+    // Busca os horários da subcoleção
+    const snap = await espRef.collection("horarios")
+      .orderBy("createdAt", "desc") // opcional, só se todos tiverem createdAt
       .get();
 
-    const horarios = horariosSnap.docs.map(doc => ({
+    const horarios = snap.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
 
-    return res.status(200).send(horarios);
+    return res.status(200).json(horarios);
 
   } catch (error) {
     console.error("Erro ao listar horários:", error);
-    return res.status(500).send({ error: "Erro ao listar horários" });
-  }
-});
-
-
-// Listar horários
-app.get("/esp/:mac/horarios", async (req, res) => {
-  const { mac } = req.params;
-
-  try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
-
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
-
-    const espRef = espQuery.docs[0].ref;
-
-    const snap = await espRef.collection("horarios").get();
-
-    const lista = snap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-
-    return res.status(200).json(lista);
-
-  } catch (error) {
-    console.error("Erro ao listar horários:", error);
-    return res.status(500).send({ error: "Erro ao listar horários" });
+    return res.status(500).json({ error: "Erro ao listar horários" });
   }
 });
 
