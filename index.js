@@ -220,32 +220,25 @@ app.post("/esp/:mac/horarios", async (req, res) => {
   }
 });
 // Listar horários do ESP
-app.get("/esp/:mac/horarios", async (req, res) => {
-  const { mac } = req.params;
+// 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO
+app.get("/esp/horarios/:userId/:mac", async (req, res) => {
+  const { userId, mac } = req.params;
 
-  if (!mac) {
-    return res.status(400).json({ error: "MAC do dispositivo não fornecida." });
+  if (!userId || !mac) {
+    return res.status(400).json({ error: "UID e MAC são obrigatórios." });
   }
 
   try {
-    console.log("Buscando horários do ESP com MAC:", mac);
+    // 🔹 Referência do ESP dentro do usuário
+    const espRef = db.collection("users").doc(userId).collection("espDevices").doc(mac);
+    const espDoc = await espRef.get();
 
-    // Busca o ESP pela MAC em todas as subcoleções espDevices
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
-
-    if (espQuery.empty) {
-      console.warn("ESP não encontrado para MAC:", mac);
-      return res.status(200).json([]); // Retorna array vazio ao invés de erro
+    if (!espDoc.exists) {
+      return res.status(200).json([]); // Retorna array vazio se ESP não existir
     }
 
-    const espRef = espQuery.docs[0].ref;
-
-    // Busca os horários da subcoleção, usando try/catch para createdAt ausente
-    const snap = await espRef.collection("horarios")
-      .orderBy("createdAt", "desc")
-      .get();
+    // 🔹 Buscar os horários da subcoleção
+    const snap = await espRef.collection("horarios").orderBy("createdAt", "desc").get();
 
     const horarios = snap.docs.map(doc => {
       const data = doc.data();
@@ -266,6 +259,7 @@ app.get("/esp/:mac/horarios", async (req, res) => {
     return res.status(500).json({ error: "Erro ao listar horários" });
   }
 });
+
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
