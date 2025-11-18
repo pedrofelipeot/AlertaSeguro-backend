@@ -242,17 +242,15 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
 
     const horarios = snapshot.docs.map((doc) => {
       const data = doc.data();
-      let dataLocal = { ...data }; // Removido ': any' do TypeScript
 
-      // Conversão de createdAt para Date (ajustando UTC-3)
-      if (data.createdAt && data.createdAt._seconds) {
+      let dataFormatada = null;
+      if (data.createdAt?._seconds) {
         const date = new Date(data.createdAt._seconds * 1000);
-        date.setHours(date.getHours() - 3);
-        dataLocal.data = date.toLocaleDateString("pt-BR"); // dd/mm/yyyy
-        dataLocal.hora = date.toLocaleTimeString("pt-BR", { hour12: false }); // HH:MM:SS
-      } else {
-        dataLocal.data = null;
-        dataLocal.hora = null;
+        date.setHours(date.getHours() - 3); // UTC-3
+        dataFormatada =
+          date.toLocaleDateString("pt-BR") +
+          " " +
+          date.toLocaleTimeString("pt-BR", { hour12: false });
       }
 
       return {
@@ -261,19 +259,20 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
         fim: data.fim || "",
         dias: Array.isArray(data.dias) ? data.dias : [],
         ativo: !!data.ativo,
-        createdAt: dataLocal.data ? dataLocal.data + " " + dataLocal.hora : null,
-        ...dataLocal,
+        createdAt: dataFormatada, // Já formatado corretamente
       };
     });
 
     console.log("Horários encontrados:", horarios);
 
     return res.status(200).json(horarios);
+    
   } catch (error) {
     console.error("Erro ao listar horários:", error);
     return res.status(500).json({ error: "Erro ao listar horários" });
   }
 });
+
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
