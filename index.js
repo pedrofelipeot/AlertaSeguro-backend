@@ -220,7 +220,7 @@ app.post("/esp/:mac/horarios", async (req, res) => {
   }
 });
 
-// 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO
+// 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO (com ativo calculado)
 app.get("/esp/horarios/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
@@ -240,9 +240,13 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
 
     const snapshot = await horariosRef.get();
 
+    const agora = new Date();
+    const diaSemana = agora.getDay(); // 0=Dom, 1=Seg, ..., 6=Sab
+
     const horarios = snapshot.docs.map((doc) => {
       const data = doc.data();
 
+      // 🔹 Formatar createdAt
       let dataFormatada = null;
       if (data.createdAt?._seconds) {
         const date = new Date(data.createdAt._seconds * 1000);
@@ -253,20 +257,33 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
           date.toLocaleTimeString("pt-BR", { hour12: false });
       }
 
+      // 🔹 Cálculo do ativo
+      // Ex: "20:00" → [20,00]
+      const [inicioH, inicioM] = data.inicio.split(":").map(Number);
+      const [fimH, fimM] = data.fim.split(":").map(Number);
+
+      const inicioMin = inicioH * 60 + inicioM;
+      const fimMin = fimH * 60 + fimM;
+
+      const agoraMin = agora.getHours() * 60 + agora.getMinutes();
+
+      const dentroDoHorario = agoraMin >= inicioMin && agoraMin <= fimMin;
+      const diaValido = Array.isArray(data.dias) && data.dias.includes(diaSemana);
+
+      const ativoCalculado = dentroDoHorario && diaValido;
+
       return {
         id: doc.id,
-        inicio: data.inicio || "",
-        fim: data.fim || "",
-        dias: Array.isArray(data.dias) ? data.dias : [],
-        ativo: !!data.ativo,
-        createdAt: dataFormatada, // Já formatado corretamente
+        inicio: data.inicio,
+        fim: data.fim,
+        dias: data.dias || [],
+        ativo: ativoCalculado,  // 🔥 agora ativo depende do horário atual
+        createdAt: dataFormatada
       };
     });
 
-    console.log("Horários encontrados:", horarios);
-
     return res.status(200).json(horarios);
-    
+
   } catch (error) {
     console.error("Erro ao listar horários:", error);
     return res.status(500).json({ error: "Erro ao listar horários" });
