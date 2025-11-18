@@ -223,26 +223,41 @@ app.post("/esp/:mac/horarios", async (req, res) => {
 app.get("/esp/:mac/horarios", async (req, res) => {
   const { mac } = req.params;
 
+  if (!mac) {
+    return res.status(400).json({ error: "MAC do dispositivo não fornecida." });
+  }
+
   try {
-    // Busca o ESP pela MAC
+    console.log("Buscando horários do ESP com MAC:", mac);
+
+    // Busca o ESP pela MAC em todas as subcoleções espDevices
     const espQuery = await db.collectionGroup("espDevices")
       .where("mac", "==", mac)
       .get();
 
-    if (espQuery.empty)
-      return res.status(404).json({ error: "ESP não encontrado" });
+    if (espQuery.empty) {
+      console.warn("ESP não encontrado para MAC:", mac);
+      return res.status(200).json([]); // Retorna array vazio ao invés de erro
+    }
 
     const espRef = espQuery.docs[0].ref;
 
-    // Busca os horários da subcoleção
+    // Busca os horários da subcoleção, usando try/catch para createdAt ausente
     const snap = await espRef.collection("horarios")
-      .orderBy("createdAt", "desc") // opcional, só se todos tiverem createdAt
+      .orderBy("createdAt", "desc")
       .get();
 
-    const horarios = snap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const horarios = snap.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        inicio: data.inicio || '',
+        fim: data.fim || '',
+        dias: Array.isArray(data.dias) ? data.dias : [],
+        ativo: !!data.ativo,
+        createdAt: data.createdAt ? data.createdAt.toDate?.() || data.createdAt : null
+      };
+    });
 
     return res.status(200).json(horarios);
 
