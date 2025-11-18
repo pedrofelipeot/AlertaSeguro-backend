@@ -219,28 +219,32 @@ app.post("/esp/:mac/horarios", async (req, res) => {
     return res.status(500).send({ error: "Erro ao salvar horário" });
   }
 });
-// Listar horários do ESP
+
 // 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO
 app.get("/esp/horarios/:userId/:mac", async (req, res) => {
-  const { userId, mac } = req.params;
+  const { userId } = req.params;
+  const mac = decodeURIComponent(req.params.mac); // <-- CORREÇÃO
 
   if (!userId || !mac) {
     return res.status(400).json({ error: "UID e MAC são obrigatórios." });
   }
 
   try {
-    // 🔹 Referência do ESP dentro do usuário
-    const espRef = db.collection("users").doc(userId).collection("espDevices").doc(mac);
+    const espRef = db
+      .collection("users")
+      .doc(userId)
+      .collection("espDevices")
+      .doc(mac);
+
     const espDoc = await espRef.get();
 
     if (!espDoc.exists) {
-      return res.status(200).json([]); // Retorna array vazio se ESP não existir
+      return res.status(200).json([]);
     }
 
-    // 🔹 Buscar os horários da subcoleção
     const snap = await espRef.collection("horarios").orderBy("createdAt", "desc").get();
 
-    const horarios = snap.docs.map(doc => {
+    const horarios = snap.docs.map((doc) => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -248,17 +252,19 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
         fim: data.fim || '',
         dias: Array.isArray(data.dias) ? data.dias : [],
         ativo: !!data.ativo,
-        createdAt: data.createdAt ? data.createdAt.toDate?.() || data.createdAt : null
+        createdAt: data.createdAt ? 
+          data.createdAt.toDate?.() || data.createdAt 
+          : null
       };
     });
 
     return res.status(200).json(horarios);
-
   } catch (error) {
     console.error("Erro ao listar horários:", error);
     return res.status(500).json({ error: "Erro ao listar horários" });
   }
 });
+
 
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
