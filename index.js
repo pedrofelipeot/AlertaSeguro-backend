@@ -222,41 +222,51 @@ app.post("/esp/:mac/horarios", async (req, res) => {
 
 // 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO
 app.get("/esp/horarios/:userId/:mac", async (req, res) => {
-  const { userId } = req.params;
-  const mac = decodeURIComponent(req.params.mac); // <-- CORREÇÃO
+  const { userId, mac } = req.params;
 
   if (!userId || !mac) {
     return res.status(400).json({ error: "UID e MAC são obrigatórios." });
   }
 
   try {
-    const espRef = db
+    const decodedMac = decodeURIComponent(mac);
+
+    const horariosRef = db
       .collection("users")
       .doc(userId)
       .collection("espDevices")
-      .doc(mac);
+      .doc(decodedMac)
+      .collection("horarios");
 
-    const espDoc = await espRef.get();
+    const snapshot = await horariosRef.get();
 
-    if (!espDoc.exists) {
-      return res.status(200).json([]);
-    }
-
-    const snap = await espRef.collection("horarios").orderBy("createdAt", "desc").get();
-
-    const horarios = snap.docs.map((doc) => {
+    const horarios = snapshot.docs.map((doc) => {
       const data = doc.data();
+      let dataLocal = { ...data }; // Removido ': any' do TypeScript
+
+      // Conversão de createdAt para Date (ajustando UTC-3)
+      if (data.createdAt && data.createdAt._seconds) {
+        const date = new Date(data.createdAt._seconds * 1000);
+        date.setHours(date.getHours() - 3);
+        dataLocal.data = date.toLocaleDateString("pt-BR"); // dd/mm/yyyy
+        dataLocal.hora = date.toLocaleTimeString("pt-BR", { hour12: false }); // HH:MM:SS
+      } else {
+        dataLocal.data = null;
+        dataLocal.hora = null;
+      }
+
       return {
         id: doc.id,
-        inicio: data.inicio || '',
-        fim: data.fim || '',
+        inicio: data.inicio || "",
+        fim: data.fim || "",
         dias: Array.isArray(data.dias) ? data.dias : [],
         ativo: !!data.ativo,
-        createdAt: data.createdAt ? 
-          data.createdAt.toDate?.() || data.createdAt 
-          : null
+        createdAt: dataLocal.data ? dataLocal.data + " " + dataLocal.hora : null,
+        ...dataLocal,
       };
     });
+
+    console.log("Horários encontrados:", horarios);
 
     return res.status(200).json(horarios);
   } catch (error) {
@@ -264,8 +274,6 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
     return res.status(500).json({ error: "Erro ao listar horários" });
   }
 });
-
-
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
