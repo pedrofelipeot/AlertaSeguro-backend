@@ -111,6 +111,51 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+// =======================
+// Login com Google
+// =======================
+app.post("/auth/google", async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(400).json({ error: "Token do Google é obrigatório" });
+  }
+
+  try {
+    // 1) Validar token JWT vindo do Firebase
+    const decoded = await admin.auth().verifyIdToken(idToken);
+
+    const uid = decoded.uid;
+    const email = decoded.email;
+    const nome = decoded.name || decoded.displayName || "";
+
+    // 2) Verificar se usuário existe no Firestore
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      // 3) Criar no Firestore se for primeiro login
+      await userRef.set({
+        email,
+        nome,
+        fcmToken: ""
+      });
+    }
+
+    // 4) Retornar dados para o app
+    return res.status(200).json({
+      uid,
+      email,
+      nome
+    });
+
+  } catch (error) {
+    console.error("Erro ao autenticar via Google:", error);
+    return res.status(401).json({ error: "Token inválido ou expirado" });
+  }
+});
+
+
 // Salvar token FCM
 app.post("/api/token", async (req, res) => {
   const { uid, token } = req.body;
