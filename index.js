@@ -94,6 +94,42 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
+app.post("/auth/google", async (req, res) => {
+  const { uid, email, nome } = req.body;
+
+  if (!uid || !email) {
+    return res.status(400).send({ error: "UID e email são obrigatórios" });
+  }
+
+  try {
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      // Criar novo usuário
+      await userRef.set({
+        email,
+        nome: nome || "",
+        fcmToken: "",
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    const userData = await userRef.get();
+
+    return res.status(200).send({
+      uid: uid,
+      email: email,
+      nome: userData.data()?.nome || ""
+    });
+
+  } catch (error) {
+    console.error("Erro no login/cadastro Google:", error);
+    return res.status(500).send({ error: "Erro ao processar login Google" });
+  }
+});
+
+
 
 // =======================
 // LOGIN REAL COM SENHA
