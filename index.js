@@ -3,6 +3,7 @@
 // =======================
 
 require('dotenv').config();
+const axios = require("axios"); // coloque no topo do arquivo
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
@@ -67,9 +68,12 @@ app.use((req, res, next) => {
 // Auth
 // =======================
 
-// Registrar usuário
 app.post("/auth/register", async (req, res) => {
   const { email, password, nome } = req.body;
+
+  if (!email || !password || !nome)
+    return res.status(400).send({ error: "Dados obrigatórios faltando." });
+
   try {
     const userRecord = await admin.auth().createUser({
       email,
@@ -85,29 +89,49 @@ app.post("/auth/register", async (req, res) => {
 
     res.status(201).send({ uid: userRecord.uid });
   } catch (error) {
-    console.error("Erro ao registrar usuário:", error);
+    console.error("Erro ao registrar:", error);
     res.status(400).send({ error: error.message });
   }
 });
 
-// Login
-app.post("/auth/login", async (req, res) => {
-  const { email } = req.body;
 
-  if (!email)
-    return res.status(400).send({ error: "O email é obrigatório" });
+// =======================
+// LOGIN REAL COM SENHA
+// =======================
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password)
+    return res.status(400).send({ error: "Email e senha são obrigatórios" });
 
   try {
-    const userRecord = await admin.auth().getUserByEmail(email);
+    // 🔥 Login REAL usando Firebase Auth REST API
+    const response = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.FIREBASE_API_KEY}`,
+      {
+        email,
+        password,
+        returnSecureToken: true
+      }
+    );
 
-    res.status(200).send({
-      uid: userRecord.uid,
-      displayName: userRecord.displayName,
-      email: userRecord.email
+    const { localId } = response.data; // UID real
+
+    // 🔍 Buscar dados extras do Firestore (nome, token, etc.)
+    const userDoc = await db.collection("users").doc(localId).get();
+
+    return res.status(200).send({
+      uid: localId,
+      email,
+      nome: userDoc.data()?.nome || "",
     });
+
   } catch (error) {
-    console.error("Erro ao logar:", error);
-    res.status(400).send({ error: error.message });
+    console.error("Erro no login:", error.response?.data || error.message);
+
+    return res.status(401).send({
+      error: "Email ou senha incorretos"
+    });
   }
 });
 
