@@ -93,36 +93,34 @@ app.post("/auth/register", async (req, res) => {
     res.status(400).send({ error: error.message });
   }
 });
-
 app.post("/auth/google", async (req, res) => {
-  const { uid, email, nome } = req.body;
+  const { idToken } = req.body; // Receber idToken em vez de uid/email
 
-  if (!uid || !email) {
-    return res.status(400).send({ error: "UID e email são obrigatórios" });
+  if (!idToken) {
+    return res.status(400).send({ error: "idToken é obrigatório" });
   }
 
   try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid, email, name } = decodedToken;
+
     const userRef = db.collection("users").doc(uid);
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      // Criar novo usuário
       await userRef.set({
         email,
-        nome: nome || "",
+        nome: name || "",
         fcmToken: "",
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       });
     }
 
-    const userData = await userRef.get();
-
     return res.status(200).send({
-      uid: uid,
-      email: email,
-      nome: userData.data()?.nome || ""
+      uid,
+      email,
+      nome: (userDoc.data()?.nome || name) || ""
     });
-
   } catch (error) {
     console.error("Erro no login/cadastro Google:", error);
     return res.status(500).send({ error: "Erro ao processar login Google" });
