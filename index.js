@@ -94,16 +94,41 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 app.post("/auth/google", async (req, res) => {
-  const { idToken } = req.body; // Receber idToken em vez de uid/email
+  const { idToken } = req.body;
 
   if (!idToken) {
     return res.status(400).send({ error: "idToken é obrigatório" });
   }
 
   try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid, email, name } = decodedToken;
+    // 1) VALIDAR TOKEN NO GOOGLE (não no Firebase ainda)
+    const googleResponse = await axios.get(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
+    );
 
+    const { sub, email, name, picture } = googleResponse.data;
+    const uid = sub; // ID do Google
+
+    let userRecord;
+
+    try {
+      // 2) TENTAR BUSCAR USUÁRIO NO FIREBASE
+      userRecord = await admin.auth().getUser(uid);
+    } catch (err) {
+      if (err.code === "auth/user-not-found") {
+        // 3) SE NÃO EXISTE → CRIA NO FIREBASE AUTH  
+        userRecord = await admin.auth().createUser({
+          uid,
+          email,
+          displayName: name,
+          photoURL: picture
+        });
+      } else {
+        throw err;
+      }
+    }
+
+    // 4) GARANTIR QUE TENHA UM DOCUMENTO NO FIRESTORE
     const userRef = db.collection("users").doc(uid);
     const userDoc = await userRef.get();
 
@@ -111,6 +136,7 @@ app.post("/auth/google", async (req, res) => {
       await userRef.set({
         email,
         nome: name || "",
+        foto: picture || "",
         fcmToken: "",
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       });
@@ -119,13 +145,15 @@ app.post("/auth/google", async (req, res) => {
     return res.status(200).send({
       uid,
       email,
-      nome: (userDoc.data()?.nome || name) || ""
+      nome: name
     });
+
   } catch (error) {
     console.error("Erro no login/cadastro Google:", error);
     return res.status(500).send({ error: "Erro ao processar login Google" });
   }
 });
+
 
 
 
