@@ -518,6 +518,91 @@ app.post("/esp/event", async (req, res) => {
   }
 });
 
+// DELETE /usuario/:uid
+app.delete("/usuario/:uid", async (req, res) => {
+  const { uid } = req.params;
+
+  try {
+    // Deleta usuário no Firebase Auth
+    await admin.auth().deleteUser(uid);
+
+    // Deleta usuário no Firestore
+    await db.collection("users").doc(uid).delete();
+
+    return res.status(200).json({ message: "Usuário deletado com sucesso" });
+  } catch (error) {
+    console.error("Erro ao deletar usuário:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+// DELETE /esp/:uid/:mac
+app.delete("/esp/:uid/:mac", async (req, res) => {
+  const { uid, mac } = req.params;
+
+  try {
+    const espRef = db.collection("users").doc(uid).collection("espDevices").doc(mac);
+    const docSnap = await espRef.get();
+
+    if (!docSnap.exists) return res.status(404).json({ error: "Sensor não encontrado" });
+
+    await espRef.delete();
+
+    return res.status(200).json({ message: "Sensor deletado com sucesso" });
+  } catch (error) {
+    console.error("Erro ao deletar sensor:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+// DELETE /horario/:uid/:mac/:horarioId
+app.delete("/horario/:uid/:mac/:horarioId", async (req, res) => {
+  const { uid, mac, horarioId } = req.params;
+
+  try {
+    const horarioRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(mac)
+      .collection("horarios")
+      .doc(horarioId);
+
+    const docSnap = await horarioRef.get();
+    if (!docSnap.exists) return res.status(404).json({ error: "Horário não encontrado" });
+
+    await horarioRef.delete();
+
+    return res.status(200).json({ message: "Horário deletado com sucesso" });
+  } catch (error) {
+    console.error("Erro ao deletar horário:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+// DELETE /notificacao/:uid/:mac/:eventId
+app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
+  const { uid, mac, eventId } = req.params;
+
+  try {
+    const eventRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(mac)
+      .collection("events")
+      .doc(eventId);
+
+    const docSnap = await eventRef.get();
+    if (!docSnap.exists) return res.status(404).json({ error: "Evento não encontrado" });
+
+    await eventRef.delete();
+
+    return res.status(200).json({ message: "Notificação deletada com sucesso" });
+  } catch (error) {
+    console.error("Erro ao deletar notificação:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+
 // =======================
 // Inicializar servidor
 // =======================
