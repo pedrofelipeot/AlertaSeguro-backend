@@ -64,6 +64,11 @@ app.use((req, res, next) => {
   next();
 });
 
+
+app.get('/ping', (req, res) => {
+  res.json({ status: 'Backend acordado 😎' });
+});
+
 // =======================
 // Auth
 // =======================
