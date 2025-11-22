@@ -540,19 +540,51 @@ app.delete("/esp/:uid/:mac", async (req, res) => {
   const { uid, mac } = req.params;
 
   try {
-    const espRef = db.collection("users").doc(uid).collection("espDevices").doc(mac);
+    const espRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(mac);
+
     const docSnap = await espRef.get();
 
-    if (!docSnap.exists) return res.status(404).json({ error: "Sensor não encontrado" });
+    if (!docSnap.exists)
+      return res.status(404).json({ error: "Sensor não encontrado" });
 
+    // 🔥 Deletar subcoleções primeiro
+    const subcollections = ["horarios", "eventos", "notificacoes"];
+
+    for (const sub of subcollections) {
+      const subRef = espRef.collection(sub);
+      const snap = await subRef.get();
+
+      const batch = db.batch();
+
+      snap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+
+      if (!snap.empty) {
+        await batch.commit();
+        console.log(`✅ Subcoleção ${sub} apagada`);
+      }
+    }
+
+    // Agora deleta o sensor
     await espRef.delete();
 
-    return res.status(200).json({ message: "Sensor deletado com sucesso" });
+    console.log("✅ Sensor deletado completamente do Firebase");
+
+    return res.status(200).json({
+      message: "Sensor e subcoleções deletados com sucesso"
+    });
+
   } catch (error) {
     console.error("Erro ao deletar sensor:", error);
     return res.status(500).json({ error: error.message });
   }
 });
+
 // DELETE /esp/horarios/:uid/:mac/:horarioId
 app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
   const { uid, mac, horarioId } = req.params;
