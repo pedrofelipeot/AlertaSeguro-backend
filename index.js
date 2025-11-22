@@ -278,22 +278,25 @@ app.post("/esp/register", async (req, res) => {
 // =======================
 
 // Salvar horário
-app.post("/esp/:mac/horarios", async (req, res) => {
-  const { mac } = req.params;
+app.post("/esp/:uid/:mac/horarios", async (req, res) => {
+  const { uid, mac } = req.params;
   const { inicio, fim, dias, ativo } = req.body;
 
   if (!inicio || !fim || !dias)
     return res.status(400).send({ error: "Campos obrigatórios ausentes." });
 
   try {
-    const espQuery = await db.collectionGroup("espDevices")
-      .where("mac", "==", mac)
-      .get();
+    // Acessa DIRETO no usuário certo
+    const espRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(mac);
 
-    if (espQuery.empty)
-      return res.status(404).send({ error: "ESP não encontrado" });
+    const espDoc = await espRef.get();
 
-    const espRef = espQuery.docs[0].ref;
+    if (!espDoc.exists)
+      return res.status(404).send({ error: "ESP não encontrado nesse usuário." });
 
     await espRef.collection("horarios").add({
       inicio,
@@ -310,6 +313,7 @@ app.post("/esp/:mac/horarios", async (req, res) => {
     return res.status(500).send({ error: "Erro ao salvar horário" });
   }
 });
+
 
 // 🔹 LISTAR HORÁRIOS DE UM DISPOSITIVO (com ativo calculado)
 app.get("/esp/horarios/:userId/:mac", async (req, res) => {
