@@ -432,9 +432,6 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
 });
 
 
-// =======================
-// EVENTO DO ESP (COM NOTIFICAÇÃO)
-// =======================
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
@@ -443,11 +440,14 @@ app.post("/esp/event", async (req, res) => {
   }
 
   try {
-    // Buscar qual usuário possui esse MAC
+    // ===========================
+    // 1. Encontrar usuário dono do ESP
+    // ===========================
     const usersRef = db.collection("users");
     const usersSnapshot = await usersRef.get();
 
     let userId = null;
+    let deviceRef = null;
     let deviceName = "Desconhecido";
 
     for (const userDoc of usersSnapshot.docs) {
@@ -456,45 +456,85 @@ app.post("/esp/event", async (req, res) => {
 
       if (!espSnapshot.empty) {
         userId = userDoc.id;
+        deviceRef = espSnapshot.docs[0].ref;
         deviceName = espSnapshot.docs[0].data().nome || "Sem nome";
         break;
       }
     }
 
-    if (!userId) {
+    if (!userId || !deviceRef) {
       return res.status(404).json({ error: "Dispositivo não encontrado" });
     }
 
     const mensagemFinal = `${deviceName}: ${mensagem}`;
 
     // ===========================
-    // 1. Salvar evento
+    // 2. Consultar horários
     // ===========================
-    await db
-      .collection("users")
-      .doc(userId)
-      .collection("espDevices")
-      .doc(mac)
-      .collection("events")
-      .add({
-        mensagem: mensagemFinal,
-        deviceName,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+    const horariosSnapshot = await deviceRef.collection("horarios").get();
+
+    const agora = new Date();
+    const diaAtual = agora.getDay(); // 0 = domingo
+    const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
+
+    let dentroDoHorario = false;
+
+    for (const doc of horariosSnapshot.docs) {
+      const data = doc.data();
+
+      if (!data.ativo) continue; // se tiver flag ativo salva
+
+      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
+        continue;
+      }
+
+      const [inicioH, inicioM] = data.inicio.split(":").map(Number);
+      const [fimH, fimM] = data.fim.split(":").map(Number);
+
+      const inicioMin = inicioH * 60 + inicioM;
+      const fimMin = fimH * 60 + fimM;
+
+      if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
+        dentroDoHorario = true;
+        break;
+      }
+    }
 
     // ===========================
-    // 2. Buscar token FCM do usuário
+    // 3. Salvar evento SEMPRE
+    // ===========================
+    await deviceRef.collection("events").add({
+      mensagem: mensagemFinal,
+      deviceName,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      notificado: dentroDoHorario
+    });
+
+    // ===========================
+    // 4. Se estiver fora do horário → NÃO notifica
+    // ===========================
+    if (!dentroDoHorario) {
+      console.log("⛔ Evento fora do horário. Notificação bloqueada.");
+      return res.json({
+        success: true,
+        notified: false,
+        reason: "Fora do horário programado"
+      });
+    }
+
+    // ===========================
+    // 5. Buscar token
     // ===========================
     const userDoc = await db.collection("users").doc(userId).get();
     const fcmToken = userDoc.data().fcmToken;
 
     if (!fcmToken) {
-      console.warn("⚠ Usuário sem token FCM cadastrado!");
-      return res.json({ success: true, warning: "Usuário sem token FCM" });
+      console.warn("Usuário sem token FCM");
+      return res.json({ success: true, notified: false });
     }
 
     // ===========================
-    // 3. Enviar notificação FCM
+    // 6. Enviar notificação
     // ===========================
     await admin.messaging().send({
       token: fcmToken,
@@ -508,15 +548,16 @@ app.post("/esp/event", async (req, res) => {
       }
     });
 
-    console.log("📩 Notificação enviada para:", fcmToken);
+    console.log("📩 Notificação enviada!");
 
     return res.json({ success: true, notified: true });
 
   } catch (error) {
-    console.error("Erro ao salvar evento:", error);
-    res.status(500).json({ error: "Erro interno do servidor" });
+    console.error("Erro no /esp/event:", error);
+    res.status(500).json({ error: "Erro interno no servidor" });
   }
 });
+
 
 // DELETE /usuario/:uid
 app.delete("/usuario/:uid", async (req, res) => {
