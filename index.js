@@ -482,7 +482,7 @@ app.post("/esp/event", async (req, res) => {
     for (const doc of horariosSnapshot.docs) {
       const data = doc.data();
 
-      if (!data.ativo) continue; // se tiver flag ativo salva
+      if (!data.ativo) continue;
 
       if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
         continue;
@@ -501,26 +501,27 @@ app.post("/esp/event", async (req, res) => {
     }
 
     // ===========================
-    // 3. Salvar evento SEMPRE
+    // 3. Se estiver fora do horário → BLOQUEIA TUDO
+    // ===========================
+    if (!dentroDoHorario) {
+      console.log("⛔ Evento bloqueado (fora do horário). Nada foi salvo.");
+      return res.json({
+        success: true,
+        notified: false,
+        saved: false,
+        reason: "Fora do horário programado"
+      });
+    }
+
+    // ===========================
+    // 4. SALVAR EVENTO (AGORA SÓ SE ESTIVER NO HORÁRIO)
     // ===========================
     await deviceRef.collection("events").add({
       mensagem: mensagemFinal,
       deviceName,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      notificado: dentroDoHorario
+      notificado: true
     });
-
-    // ===========================
-    // 4. Se estiver fora do horário → NÃO notifica
-    // ===========================
-    if (!dentroDoHorario) {
-      console.log("⛔ Evento fora do horário. Notificação bloqueada.");
-      return res.json({
-        success: true,
-        notified: false,
-        reason: "Fora do horário programado"
-      });
-    }
 
     // ===========================
     // 5. Buscar token
@@ -530,7 +531,7 @@ app.post("/esp/event", async (req, res) => {
 
     if (!fcmToken) {
       console.warn("Usuário sem token FCM");
-      return res.json({ success: true, notified: false });
+      return res.json({ success: true, notified: false, saved: true });
     }
 
     // ===========================
@@ -550,7 +551,7 @@ app.post("/esp/event", async (req, res) => {
 
     console.log("📩 Notificação enviada!");
 
-    return res.json({ success: true, notified: true });
+    return res.json({ success: true, notified: true, saved: true });
 
   } catch (error) {
     console.error("Erro no /esp/event:", error);
