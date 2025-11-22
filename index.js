@@ -436,15 +436,16 @@ app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   if (!mac || !mensagem) {
-    return res.status(400).json({ error: "MAC e mensagem são obrigatórios" });
+    return res.status(400).json({
+      error: "MAC e mensagem são obrigatórios"
+    });
   }
 
   try {
     // ===========================
     // 1. Encontrar usuário dono do ESP
     // ===========================
-    const usersRef = db.collection("users");
-    const usersSnapshot = await usersRef.get();
+    const usersSnapshot = await db.collection("users").get();
 
     let userId = null;
     let deviceRef = null;
@@ -463,13 +464,15 @@ app.post("/esp/event", async (req, res) => {
     }
 
     if (!userId || !deviceRef) {
-      return res.status(404).json({ error: "Dispositivo não encontrado" });
+      return res.status(404).json({
+        error: "Dispositivo não encontrado para esse MAC"
+      });
     }
 
     const mensagemFinal = `${deviceName}: ${mensagem}`;
 
     // ===========================
-    // 2. Consultar horários
+    // 2. Buscar horários do ESP
     // ===========================
     const horariosSnapshot = await deviceRef.collection("horarios").get();
 
@@ -484,9 +487,7 @@ app.post("/esp/event", async (req, res) => {
 
       if (!data.ativo) continue;
 
-      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
-        continue;
-      }
+      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) continue;
 
       const [inicioH, inicioM] = data.inicio.split(":").map(Number);
       const [fimH, fimM] = data.fim.split(":").map(Number);
@@ -504,34 +505,43 @@ app.post("/esp/event", async (req, res) => {
     // 3. Se estiver fora do horário → BLOQUEIA TUDO
     // ===========================
     if (!dentroDoHorario) {
-      console.log("⛔ Evento bloqueado (fora do horário). Nada foi salvo.");
+      console.log(`⛔ Evento bloqueado (fora do horário) - MAC ${mac}`);
+
       return res.json({
         success: true,
-        notified: false,
+        blocked: true,
         saved: false,
+        notified: false,
         reason: "Fora do horário programado"
       });
     }
 
     // ===========================
-    // 4. SALVAR EVENTO (AGORA SÓ SE ESTIVER NO HORÁRIO)
+    // 4. SALVAR EVENTO (somente no horário)
     // ===========================
     await deviceRef.collection("events").add({
       mensagem: mensagemFinal,
       deviceName,
+      mac: mac,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       notificado: true
     });
 
     // ===========================
-    // 5. Buscar token
+    // 5. Buscar token FCM do usuário
     // ===========================
     const userDoc = await db.collection("users").doc(userId).get();
-    const fcmToken = userDoc.data().fcmToken;
+    const fcmToken = userDoc.data()?.fcmToken;
 
     if (!fcmToken) {
-      console.warn("Usuário sem token FCM");
-      return res.json({ success: true, notified: false, saved: true });
+      console.warn(`⚠ Usuário ${userId} não possui FCM Token`);
+
+      return res.json({
+        success: true,
+        saved: true,
+        notified: false,
+        warning: "Usuário sem token FCM"
+      });
     }
 
     // ===========================
@@ -544,20 +554,28 @@ app.post("/esp/event", async (req, res) => {
         body: mensagemFinal,
       },
       data: {
-        mac,
+        mac: mac,
         mensagem: mensagemFinal
       }
     });
 
-    console.log("📩 Notificação enviada!");
+    console.log(`📩 Notificação enviada para ${userId}`);
 
-    return res.json({ success: true, notified: true, saved: true });
+    return res.json({
+      success: true,
+      saved: true,
+      notified: true
+    });
 
   } catch (error) {
-    console.error("Erro no /esp/event:", error);
-    res.status(500).json({ error: "Erro interno no servidor" });
+    console.error("❌ Erro no /esp/event:", error);
+
+    return res.status(500).json({
+      error: "Erro interno no servidor"
+    });
   }
 });
+
 
 
 // DELETE /usuario/:uid
