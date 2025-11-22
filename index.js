@@ -442,6 +442,8 @@ app.post("/esp/event", async (req, res) => {
   }
 
   try {
+    console.log("📡 Evento recebido:", mac, mensagem);
+
     // ===========================
     // 1. Encontrar usuário dono do ESP
     // ===========================
@@ -464,30 +466,43 @@ app.post("/esp/event", async (req, res) => {
     }
 
     if (!userId || !deviceRef) {
-      return res.status(404).json({
-        error: "Dispositivo não encontrado para esse MAC"
-      });
+      console.log("❌ Dispositivo não encontrado:", mac);
+      return res.status(404).json({ error: "Dispositivo não encontrado" });
     }
 
     const mensagemFinal = `${deviceName}: ${mensagem}`;
 
     // ===========================
-    // 2. Buscar horários do ESP
+    // 2. Buscar horários
     // ===========================
     const horariosSnapshot = await deviceRef.collection("horarios").get();
 
+    // Ajustando fuso horário (-3 Brasil)
     const agora = new Date();
-    const diaAtual = agora.getDay(); // 0 = domingo
-    const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
+    const agoraBR = new Date(agora.getTime() - (3 * 60 * 60 * 1000));
+
+    const diaAtual = agoraBR.getDay();
+    const minutosAgora = agoraBR.getHours() * 60 + agoraBR.getMinutes();
+
+    console.log("🕒 Agora:", agoraBR.toLocaleString());
+    console.log("📅 Dia:", diaAtual, "| Minutos:", minutosAgora);
 
     let dentroDoHorario = false;
 
     for (const doc of horariosSnapshot.docs) {
       const data = doc.data();
 
-      if (!data.ativo) continue;
+      console.log("📄 Horário:", data);
 
-      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) continue;
+      if (!data.ativo) {
+        console.log("⏭ Horário desativado");
+        continue;
+      }
+
+      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
+        console.log("⏭ Dia não permitido:", data.dias);
+        continue;
+      }
 
       const [inicioH, inicioM] = data.inicio.split(":").map(Number);
       const [fimH, fimM] = data.fim.split(":").map(Number);
@@ -495,52 +510,64 @@ app.post("/esp/event", async (req, res) => {
       const inicioMin = inicioH * 60 + inicioM;
       const fimMin = fimH * 60 + fimM;
 
-      if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
-        dentroDoHorario = true;
-        break;
+      console.log("⏱ Comparação:", minutosAgora, "entre", inicioMin, "e", fimMin);
+
+      // Se o horário NÃO atravessa a meia-noite
+      if (inicioMin <= fimMin) {
+        if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
+          dentroDoHorario = true;
+          break;
+        }
+      } 
+      // Se ele atravessa meia-noite (ex: 22:00 → 06:00)
+      else {
+        if (minutosAgora >= inicioMin || minutosAgora <= fimMin) {
+          dentroDoHorario = true;
+          break;
+        }
       }
     }
 
     // ===========================
-    // 3. Se estiver fora do horário → BLOQUEIA TUDO
+    // 3. Fora do horário → bloqueia
     // ===========================
     if (!dentroDoHorario) {
-      console.log(`⛔ Evento bloqueado (fora do horário) - MAC ${mac}`);
+      console.log("⛔ Evento bloqueado: fora do horário");
 
       return res.json({
         success: true,
         blocked: true,
         saved: false,
-        notified: false,
-        reason: "Fora do horário programado"
+        notified: false
       });
     }
 
+    console.log("✅ Dentro do horário");
+
     // ===========================
-    // 4. SALVAR EVENTO (somente no horário)
+    // 4. Salvar evento
     // ===========================
     await deviceRef.collection("events").add({
       mensagem: mensagemFinal,
       deviceName,
-      mac: mac,
+      mac,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       notificado: true
     });
 
     // ===========================
-    // 5. Buscar token FCM do usuário
+    // 5. Buscar token
     // ===========================
     const userDoc = await db.collection("users").doc(userId).get();
     const fcmToken = userDoc.data()?.fcmToken;
 
     if (!fcmToken) {
-      console.warn(`⚠ Usuário ${userId} não possui FCM Token`);
+      console.warn("⚠ Usuário sem token FCM");
 
       return res.json({
         success: true,
         saved: true,
-        notified: false,
-        warning: "Usuário sem token FCM"
+        notified: false
       });
     }
 
@@ -554,12 +581,12 @@ app.post("/esp/event", async (req, res) => {
         body: mensagemFinal,
       },
       data: {
-        mac: mac,
+        mac,
         mensagem: mensagemFinal
       }
     });
 
-    console.log(`📩 Notificação enviada para ${userId}`);
+    console.log("📩 Notificação enviada!");
 
     return res.json({
       success: true,
@@ -575,7 +602,6 @@ app.post("/esp/event", async (req, res) => {
     });
   }
 });
-
 
 
 // DELETE /usuario/:uid
