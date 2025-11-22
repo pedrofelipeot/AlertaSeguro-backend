@@ -553,8 +553,8 @@ app.delete("/esp/:uid/:mac", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
-// DELETE /horario/:uid/:mac/:horarioId
-app.delete("/horario/:uid/:mac/:horarioId", async (req, res) => {
+// DELETE /esp/horarios/:uid/:mac/:horarioId
+app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
   const { uid, mac, horarioId } = req.params;
 
   try {
@@ -577,6 +577,7 @@ app.delete("/horario/:uid/:mac/:horarioId", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
+
 // DELETE /notificacao/:uid/:mac/:eventId
 app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
   const { uid, mac, eventId } = req.params;
