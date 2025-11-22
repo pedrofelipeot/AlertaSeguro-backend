@@ -385,6 +385,70 @@ app.get("/esp/horarios/:userId/:mac", async (req, res) => {
   }
 });
 
+app.get("/esp/horarios/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    return res.status(400).json({ error: "UID é obrigatório." });
+  }
+
+  try {
+    const espDevicesRef = db
+      .collection("users")
+      .doc(userId)
+      .collection("espDevices");
+
+    const espSnapshot = await espDevicesRef.get();
+    const agora = new Date();
+    const diaSemana = agora.getDay();
+
+    let todosHorarios = [];
+
+    for (const espDoc of espSnapshot.docs) {
+      const mac = espDoc.id;
+      const espData = espDoc.data();
+
+      const horariosSnapshot = await espDevicesRef
+        .doc(mac)
+        .collection("horarios")
+        .get();
+
+      horariosSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+
+        // 🔹 calcular se está ativo
+        const [inicioH, inicioM] = data.inicio.split(":").map(Number);
+        const [fimH, fimM] = data.fim.split(":").map(Number);
+
+        const inicioMin = inicioH * 60 + inicioM;
+        const fimMin = fimH * 60 + fimM;
+        const agoraMin = agora.getHours() * 60 + agora.getMinutes();
+
+        const dentroDoHorario = agoraMin >= inicioMin && agoraMin <= fimMin;
+        const diaValido = Array.isArray(data.dias) && data.dias.includes(diaSemana);
+        const ativoCalculado = dentroDoHorario && diaValido;
+
+        todosHorarios.push({
+          id: doc.id,
+          mac: mac, // IMPORTANTE
+          deviceName: espData.name || '',
+          inicio: data.inicio,
+          fim: data.fim,
+          dias: data.dias || [],
+          ativo: ativoCalculado
+        });
+      });
+    }
+
+    return res.status(200).json(todosHorarios);
+
+  } catch (error) {
+    console.error("Erro ao listar todos os horários:", error);
+    return res.status(500).json({ error: "Erro ao listar horários" });
+  }
+});
+
+
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
