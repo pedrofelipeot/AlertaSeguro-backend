@@ -3,7 +3,7 @@
 // =======================
 
 require('dotenv').config();
-const axios = require("axios");
+const axios = require("axios"); // coloque no topo do arquivo
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
@@ -44,9 +44,6 @@ const db = admin.firestore();
 // =======================
 const app = express();
 
-// 🔥 IMPORTANTE — permite que Cloudflare/Render encaminhem IP/HTTPS corretamente
-app.enable("trust proxy");
-
 app.use(cors({
   origin: [
     "http://localhost:8100",
@@ -67,23 +64,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// =======================
-// 🚨 ROTA LIBERADA PARA TESTE DO ESP32
-// =======================
-app.post("/esp/event", (req, res) => {
-  console.log("📡 EVENTO DO ESP32 RECEBIDO:", req.body);
-  res.json({ ok: true, recebido: req.body });
-});
-
-// =====================================================
-// (AQUI continuam suas rotas normais de Auth, dispositivos etc.)
-// =====================================================
-
-// No final do arquivo (IMPORTANTÍSSIMO):
-const port = process.env.PORT || 3000;
-app.listen(port, "0.0.0.0", () => {
-  console.log("🚀 Servidor rodando na porta " + port);
-});
 
 app.get('/ping', (req, res) => {
   res.json({ status: 'Backend acordado 😎' });
@@ -92,51 +72,6 @@ app.get('/ping', (req, res) => {
 // =======================
 // Auth
 // =======================
-
-app.post("/esp/register", async (req, res) => {
-  const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
-
-  if (!uid || !mac || !nome)
-    return res.status(400).send({ error: "UID, MAC e nome são obrigatórios" });
-
-  try {
-    const macNormalizado = mac.toLowerCase();
-
-    // Sensor global
-    const espRef = db.collection("espDevices").doc(macNormalizado);
-
-    await espRef.set({
-      mac: macNormalizado,
-      nome,
-      localizacao,
-      tipo,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      usuarios: {
-        [uid]: true
-      }
-    }, { merge: true });
-
-    // Vínculo com usuário
-    const userEspRef = db
-      .collection("users")
-      .doc(uid)
-      .collection("espDevices")
-      .doc(macNormalizado);
-
-    await userEspRef.set({
-      mac: macNormalizado,
-      nome,
-      localizacao,
-      tipo
-    });
-
-    res.status(201).send({ msg: "Sensor registrado e vinculado ao usuário!" });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ error: "Erro ao registrar sensor" });
-  }
-});
 
 app.post("/auth/register", async (req, res) => {
   const { email, password, nome } = req.body;
@@ -163,7 +98,6 @@ app.post("/auth/register", async (req, res) => {
     res.status(400).send({ error: error.message });
   }
 });
-
 app.post("/auth/google", async (req, res) => {
   const { idToken } = req.body;
 
@@ -308,6 +242,7 @@ app.get("/users/:uid/esp/list", async (req, res) => {
   }
 });
 
+// Cadastrar ESP
 app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
@@ -315,41 +250,26 @@ app.post("/esp/register", async (req, res) => {
     return res.status(400).send({ error: "UID, MAC e nome são obrigatórios" });
 
   try {
-    const macNormalizado = mac.toLowerCase();
-
-    // Sensor global
-    const espRef = db.collection("espDevices").doc(macNormalizado);
-
-    await espRef.set({
-      mac: macNormalizado,
-      nome,
-      localizacao,
-      tipo,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      usuarios: {
-        [uid]: true
-      }
-    }, { merge: true });
-
-    // Vínculo com usuário
-    const userEspRef = db
+    const espRef = db
       .collection("users")
       .doc(uid)
       .collection("espDevices")
-      .doc(macNormalizado);
+      .doc(mac);
 
-    await userEspRef.set({
-      mac: macNormalizado,
+    await espRef.set({
+      mac,
       nome,
       localizacao,
-      tipo
+      tipo,
+      userId: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.status(201).send({ msg: "Sensor registrado e vinculado ao usuário!" });
+    res.status(201).send({ msg: "Sensor cadastrado com sucesso" });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).send({ error: "Erro ao registrar sensor" });
+    console.error("Erro ao cadastrar ESP:", error);
+    res.status(400).send({ error: error.message });
   }
 });
 
@@ -579,177 +499,175 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   }
 });
 
+
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
   if (!mac || !mensagem) {
-    return res.status(400).json({ error: "MAC e mensagem são obrigatórios" });
+    return res.status(400).json({
+      error: "MAC e mensagem são obrigatórios"
+    });
   }
 
-  const macNormalizado = mac.toLowerCase();
-
   try {
-    console.log("📡 Evento recebido:", macNormalizado, mensagem);
+    console.log("📡 Evento recebido:", mac, mensagem);
 
-    // =============================
-    // 1. Buscar sensor global
-    // =============================
-    const sensorRef = db.collection("espDevices").doc(macNormalizado);
-    const sensorSnap = await sensorRef.get();
+    // ===========================
+    // 1. Encontrar usuário dono do ESP
+    // ===========================
+    const usersSnapshot = await db.collection("users").get();
 
-    if (!sensorSnap.exists) {
-      return res.status(404).json({ error: "Sensor não encontrado" });
+    let userId = null;
+    let deviceRef = null;
+    let deviceName = "Desconhecido";
+
+    for (const userDoc of usersSnapshot.docs) {
+      const espDevicesRef = userDoc.ref.collection("espDevices");
+      const espSnapshot = await espDevicesRef.where("mac", "==", mac).get();
+
+      if (!espSnapshot.empty) {
+        userId = userDoc.id;
+        deviceRef = espSnapshot.docs[0].ref;
+        deviceName = espSnapshot.docs[0].data().nome || "Sem nome";
+        break;
+      }
     }
 
-    const sensorData = sensorSnap.data();
-    const usuariosMap = sensorData.usuarios || {};
-    const usuariosIds = Object.keys(usuariosMap);
-
-    if (usuariosIds.length === 0) {
-      return res.status(404).json({ error: "Nenhum usuário vinculado a esse sensor" });
+    if (!userId || !deviceRef) {
+      console.log("❌ Dispositivo não encontrado:", mac);
+      return res.status(404).json({ error: "Dispositivo não encontrado" });
     }
 
-    console.log("👥 Usuários vinculados:", usuariosIds);
+    const mensagemFinal = `${deviceName}: ${mensagem}`;
 
-    // =============================
-    // 2. Hora atual Brasil
-    // =============================
+    // ===========================
+    // 2. Buscar horários
+    // ===========================
+    const horariosSnapshot = await deviceRef.collection("horarios").get();
+
+    // Ajustando fuso horário (-3 Brasil)
     const agora = new Date();
-    const agoraBR = new Date(
-      agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
-    );
+    const agoraBR = new Date(agora.getTime() - (3 * 60 * 60 * 1000));
 
-    const diaAtual = agoraBR.getDay(); // 0 = Domingo
+    const diaAtual = agoraBR.getDay();
     const minutosAgora = agoraBR.getHours() * 60 + agoraBR.getMinutes();
 
-    console.log("🕒 Agora BR:", agoraBR.toLocaleString(), "| Dia:", diaAtual);
+    console.log("🕒 Agora:", agoraBR.toLocaleString());
+    console.log("📅 Dia:", diaAtual, "| Minutos:", minutosAgora);
 
-    let eventosSalvos = 0;
-    let notificacoesEnviadas = 0;
+    let dentroDoHorario = false;
 
-    // =============================
-    // 3. Para cada usuário
-    // =============================
-    for (const uid of usuariosIds) {
+    for (const doc of horariosSnapshot.docs) {
+      const data = doc.data();
 
-      const deviceRef = db
-        .collection("users")
-        .doc(uid)
-        .collection("espDevices")
-        .doc(macNormalizado);
+      console.log("📄 Horário:", data);
 
-      // 3.1 Buscar horários
-      const horariosSnapshot = await deviceRef
-        .collection("horarios")
-        .get();
-
-      let dentroDoHorario = false;
-
-      for (const doc of horariosSnapshot.docs) {
-        const data = doc.data();
-
-        if (!data.ativo) continue;
-
-        if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
-          continue;
-        }
-
-        const [inicioH, inicioM] = data.inicio.split(":").map(Number);
-        const [fimH, fimM] = data.fim.split(":").map(Number);
-
-        const inicioMin = inicioH * 60 + inicioM;
-        const fimMin = fimH * 60 + fimM;
-
-        // Caso normal
-        if (inicioMin <= fimMin) {
-          if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
-            dentroDoHorario = true;
-            break;
-          }
-        } 
-        // Caso atravessa meia-noite
-        else {
-          if (minutosAgora >= inicioMin || minutosAgora <= fimMin) {
-            dentroDoHorario = true;
-            break;
-          }
-        }
-      }
-
-      if (!dentroDoHorario) {
-        console.log(`⏭ Usuário ${uid} fora do horário, ignorado`);
+      if (!data.ativo) {
+        console.log("⏭ Horário desativado");
         continue;
       }
 
-      console.log(`✅ Usuário ${uid} dentro do horário`);
-
-      const nomeSensor = sensorData.nome || macNormalizado;
-      const mensagemFinal = `${nomeSensor}: ${mensagem}`;
-
-      // =============================
-      // 4. Salvar evento no usuário
-      // =============================
-      const eventRef = await deviceRef
-        .collection("events")
-        .add({
-          mac: macNormalizado,
-          mensagem: mensagemFinal,
-          dataHora: admin.firestore.FieldValue.serverTimestamp(),
-          notificado: false
-        });
-
-      eventosSalvos++;
-
-      // =============================
-      // 5. Buscar token FCM
-      // =============================
-      const userDoc = await db.collection("users").doc(uid).get();
-      const fcmToken = userDoc.data()?.fcmToken;
-
-      if (!fcmToken) {
-        console.warn(`⚠ Usuário ${uid} sem token FCM`);
+      if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
+        console.log("⏭ Dia não permitido:", data.dias);
         continue;
       }
 
-      // =============================
-      // 6. Enviar push
-      // =============================
-      try {
-        await admin.messaging().send({
-          token: fcmToken,
-          notification: {
-            title: "🚨 Alerta Seguro",
-            body: mensagemFinal
-          },
-          data: {
-            mac: macNormalizado,
-            mensagem: mensagemFinal
-          }
-        });
+      const [inicioH, inicioM] = data.inicio.split(":").map(Number);
+      const [fimH, fimM] = data.fim.split(":").map(Number);
 
-        await eventRef.update({ notificado: true });
+      const inicioMin = inicioH * 60 + inicioM;
+      const fimMin = fimH * 60 + fimM;
 
-        notificacoesEnviadas++;
-        console.log(`📩 Push enviado para ${uid}`);
+      console.log("⏱ Comparação:", minutosAgora, "entre", inicioMin, "e", fimMin);
 
-      } catch (err) {
-        console.error(`❌ Erro ao enviar push para ${uid}:`, err.message);
+      // Se o horário NÃO atravessa a meia-noite
+      if (inicioMin <= fimMin) {
+        if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
+          dentroDoHorario = true;
+          break;
+        }
+      } 
+      // Se ele atravessa meia-noite (ex: 22:00 → 06:00)
+      else {
+        if (minutosAgora >= inicioMin || minutosAgora <= fimMin) {
+          dentroDoHorario = true;
+          break;
+        }
       }
     }
 
-    // =============================
-    // 7. Resposta
-    // =============================
+    // ===========================
+    // 3. Fora do horário → bloqueia
+    // ===========================
+    if (!dentroDoHorario) {
+      console.log("⛔ Evento bloqueado: fora do horário");
+
+      return res.json({
+        success: true,
+        blocked: true,
+        saved: false,
+        notified: false
+      });
+    }
+
+    console.log("✅ Dentro do horário");
+
+    // ===========================
+    // 4. Salvar evento
+    // ===========================
+    await deviceRef.collection("events").add({
+      mensagem: mensagemFinal,
+      deviceName,
+      mac,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      notificado: true
+    });
+
+    // ===========================
+    // 5. Buscar token
+    // ===========================
+    const userDoc = await db.collection("users").doc(userId).get();
+    const fcmToken = userDoc.data()?.fcmToken;
+
+    if (!fcmToken) {
+      console.warn("⚠ Usuário sem token FCM");
+
+      return res.json({
+        success: true,
+        saved: true,
+        notified: false
+      });
+    }
+
+    // ===========================
+    // 6. Enviar notificação
+    // ===========================
+    await admin.messaging().send({
+      token: fcmToken,
+      notification: {
+        title: "Alerta Seguro",
+        body: mensagemFinal,
+      },
+      data: {
+        mac,
+        mensagem: mensagemFinal
+      }
+    });
+
+    console.log("📩 Notificação enviada!");
+
     return res.json({
       success: true,
-      usuariosVinculados: usuariosIds.length,
-      eventosSalvos,
-      notificacoesEnviadas
+      saved: true,
+      notified: true
     });
 
   } catch (error) {
     console.error("❌ Erro no /esp/event:", error);
-    return res.status(500).json({ error: "Erro interno no servidor" });
+
+    return res.status(500).json({
+      error: "Erro interno no servidor"
+    });
   }
 });
 
