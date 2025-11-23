@@ -511,12 +511,12 @@ app.get("/esp/horarios/:userId", async (req, res) => {
 
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
-// 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
   try {
-    const decodedMac = decodeURIComponent(mac).toLowerCase();
+    // Normaliza o MAC exatamente igual ao usado no /esp/event
+    const decodedMac = decodeURIComponent(mac).trim().toLowerCase();
 
     console.log("📥 Buscando eventos de:", decodedMac);
 
@@ -552,6 +552,8 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
       return e;
     });
 
+    console.log(`📦 ${events.length} eventos enviados.`);
+
     return res.status(200).json(events);
 
   } catch (error) {
@@ -559,6 +561,7 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
     return res.status(500).json({ error: "Erro ao buscar eventos" });
   }
 });
+
 
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
