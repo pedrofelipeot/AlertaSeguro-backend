@@ -518,6 +518,8 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   try {
     const decodedMac = decodeURIComponent(mac).toLowerCase();
 
+    console.log("📥 Buscando eventos de:", decodedMac);
+
     const eventsRef = db
       .collection("users")
       .doc(userId)
@@ -528,31 +530,32 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
 
     const snapshot = await eventsRef.get();
 
+    if (snapshot.empty) {
+      console.log("📭 Nenhum evento encontrado.");
+      return res.status(200).json([]);
+    }
+
     const events = snapshot.docs.map((doc) => {
       const data = doc.data();
+      const e = { ...data, id: doc.id };
 
-      let dataLocal = { ...data };
+      if (data.createdAt instanceof admin.firestore.Timestamp) {
+        const date = data.createdAt.toDate();
 
-      if (data.createdAt && data.createdAt._seconds) {
-        const date = new Date(data.createdAt._seconds * 1000);
-
-        // UTC-3
+        // Ajustar para UTC-3 (Brasil)
         date.setHours(date.getHours() - 3);
 
-        dataLocal.data = date.toLocaleDateString("pt-BR");
-        dataLocal.hora = date.toLocaleTimeString("pt-BR", { hour12: false });
+        e.data = date.toLocaleDateString("pt-BR");
+        e.hora = date.toLocaleTimeString("pt-BR", { hour12: false });
       }
 
-      return {
-        id: doc.id,
-        ...dataLocal
-      };
+      return e;
     });
 
     return res.status(200).json(events);
 
   } catch (error) {
-    console.error("Erro ao buscar eventos:", error);
+    console.error("❌ Erro ao buscar eventos:", error);
     return res.status(500).json({ error: "Erro ao buscar eventos" });
   }
 });
@@ -585,7 +588,7 @@ app.post("/esp/event", async (req, res) => {
       return res.status(404).json({ error: "Nenhum usuário vinculado a esse sensor" });
     }
 
-    // Hora BR
+    // Horário BR
     const agora = new Date();
     const agoraBR = new Date(
       agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
@@ -605,7 +608,7 @@ app.post("/esp/event", async (req, res) => {
         .collection("espDevices")
         .doc(macNormalizado);
 
-      // --- horários
+      // Busca horários
       const horariosSnapshot = await deviceRef.collection("horarios").get();
 
       let dentroDoHorario = false;
@@ -622,13 +625,14 @@ app.post("/esp/event", async (req, res) => {
         const inicioMin = inicioH * 60 + inicioM;
         const fimMin = fimH * 60 + fimM;
 
+        // Horário normal
         if (inicioMin <= fimMin) {
           if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
             dentroDoHorario = true;
             break;
           }
         } else {
-          // atravessa meia-noite
+          // Horário atravessando meia-noite
           if (minutosAgora >= inicioMin || minutosAgora <= fimMin) {
             dentroDoHorario = true;
             break;
@@ -642,21 +646,21 @@ app.post("/esp/event", async (req, res) => {
       }
 
       const nomeSensor = sensorData.nome || macNormalizado;
-      const mensagemFinal = `${nomeSensor}: ${mensagem}`;
+      const mensagemFinal = mensagem; // FE espera apenas "mensagem"
 
-      // ✅ SALVANDO NO FLUXO CORRETO
+      // 🔥 Agora createdAt SEMPRE vem completo
       const eventRef = await deviceRef
         .collection("events")
         .add({
           mac: macNormalizado,
           mensagem: mensagemFinal,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.Timestamp.now(),
           notificado: false
         });
 
       eventosSalvos++;
 
-      // Push
+      // Enviar push
       const userDoc = await db.collection("users").doc(uid).get();
       const fcmToken = userDoc.data()?.fcmToken;
 
@@ -666,7 +670,7 @@ app.post("/esp/event", async (req, res) => {
             token: fcmToken,
             notification: {
               title: "🚨 Alerta Seguro",
-              body: mensagemFinal
+              body: `${nomeSensor}: ${mensagem}`
             },
             data: {
               mac: macNormalizado,
@@ -694,6 +698,7 @@ app.post("/esp/event", async (req, res) => {
     return res.status(500).json({ error: "Erro interno no servidor" });
   }
 });
+
 
 
 
