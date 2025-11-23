@@ -3,7 +3,7 @@
 // =======================
 
 require('dotenv').config();
-const axios = require("axios"); // coloque no topo do arquivo
+const axios = require("axios");
 const express = require("express");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
@@ -44,6 +44,9 @@ const db = admin.firestore();
 // =======================
 const app = express();
 
+// 🔥 IMPORTANTE — permite que Cloudflare/Render encaminhem IP/HTTPS corretamente
+app.enable("trust proxy");
+
 app.use(cors({
   origin: [
     "http://localhost:8100",
@@ -64,6 +67,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// =======================
+// 🚨 ROTA LIBERADA PARA TESTE DO ESP32
+// =======================
+app.post("/esp/event", (req, res) => {
+  console.log("📡 EVENTO DO ESP32 RECEBIDO:", req.body);
+  res.json({ ok: true, recebido: req.body });
+});
+
+// =====================================================
+// (AQUI continuam suas rotas normais de Auth, dispositivos etc.)
+// =====================================================
+
+// No final do arquivo (IMPORTANTÍSSIMO):
+const port = process.env.PORT || 3000;
+app.listen(port, "0.0.0.0", () => {
+  console.log("🚀 Servidor rodando na porta " + port);
+});
 
 app.get('/ping', (req, res) => {
   res.json({ status: 'Backend acordado 😎' });
@@ -732,8 +752,6 @@ app.post("/esp/event", async (req, res) => {
     return res.status(500).json({ error: "Erro interno no servidor" });
   }
 });
-
-
 
 
 // DELETE /usuario/:uid
