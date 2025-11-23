@@ -73,31 +73,53 @@ app.get('/ping', (req, res) => {
 // Auth
 // =======================
 
-app.post("/auth/register", async (req, res) => {
-  const { email, password, nome } = req.body;
+app.post("/esp/register", async (req, res) => {
+  const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
-  if (!email || !password || !nome)
-    return res.status(400).send({ error: "Dados obrigatórios faltando." });
+  if (!uid || !mac || !nome)
+    return res.status(400).send({ error: "UID, MAC e nome são obrigatórios" });
 
   try {
-    const userRecord = await admin.auth().createUser({
-      email,
-      password,
-      displayName: nome,
-    });
+    const macNormalizado = mac.toLowerCase();
 
-    await db.collection("users").doc(userRecord.uid).set({
-      email,
+    // Sensor global
+    const espRef = db.collection("espDevices").doc(macNormalizado);
+
+    await espRef.set({
+      mac: macNormalizado,
       nome,
-      fcmToken: "",
+      localizacao,
+      tipo,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      usuarios: {
+        [uid]: true
+      }
+    }, { merge: true });
+
+    // Vínculo com usuário
+    const userEspRef = db
+      .collection("users")
+      .doc(uid)
+      .collection("espDevices")
+      .doc(macNormalizado);
+
+    await userEspRef.set({
+      mac: macNormalizado,
+      nome,
+      localizacao,
+      tipo
     });
 
-    res.status(201).send({ uid: userRecord.uid });
+    res.status(201).send({ msg: "Sensor registrado e vinculado ao usuário!" });
+
   } catch (error) {
-    console.error("Erro ao registrar:", error);
-    res.status(400).send({ error: error.message });
+    console.error(error);
+    res.status(500).send({ error: "Erro ao registrar sensor" });
   }
 });
+
+
+
 app.post("/auth/google", async (req, res) => {
   const { idToken } = req.body;
 
@@ -243,7 +265,7 @@ app.get("/users/:uid/esp/list", async (req, res) => {
 });
 
 // Cadastrar ESP
-app.post("/esp/register", async (req, res) => {
+/*app.post("/esp/register", async (req, res) => {
   const { uid, mac, nome, localizacao = "", tipo = "" } = req.body;
 
   if (!uid || !mac || !nome)
@@ -271,7 +293,7 @@ app.post("/esp/register", async (req, res) => {
     console.error("Erro ao cadastrar ESP:", error);
     res.status(400).send({ error: error.message });
   }
-});
+});*/
 
 // =======================
 // HORÁRIOS PROGRAMADOS
