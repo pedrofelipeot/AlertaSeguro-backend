@@ -511,11 +511,12 @@ app.get("/esp/horarios/:userId", async (req, res) => {
 
 
 // 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
+// 🔥 LISTAR EVENTOS DE UM DISPOSITIVO
 app.get("/esp/events/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
   try {
-    const decodedMac = decodeURIComponent(mac);
+    const decodedMac = decodeURIComponent(mac).toLowerCase();
 
     const eventsRef = db
       .collection("users")
@@ -523,7 +524,7 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
       .collection("espDevices")
       .doc(decodedMac)
       .collection("events")
-      .orderBy("createdAt", "desc"); // ✅ CORRETO
+      .orderBy("createdAt", "desc");
 
     const snapshot = await eventsRef.get();
 
@@ -535,7 +536,7 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
       if (data.createdAt && data.createdAt._seconds) {
         const date = new Date(data.createdAt._seconds * 1000);
 
-        // 🔹 Horário Brasil (UTC-3)
+        // UTC-3
         date.setHours(date.getHours() - 3);
 
         dataLocal.data = date.toLocaleDateString("pt-BR");
@@ -556,7 +557,6 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   }
 });
 
-
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
 
@@ -569,9 +569,7 @@ app.post("/esp/event", async (req, res) => {
   try {
     console.log("📡 Evento recebido:", macNormalizado, mensagem);
 
-    // =============================
     // 1. Buscar sensor global
-    // =============================
     const sensorRef = db.collection("espDevices").doc(macNormalizado);
     const sensorSnap = await sensorRef.get();
 
@@ -587,27 +585,18 @@ app.post("/esp/event", async (req, res) => {
       return res.status(404).json({ error: "Nenhum usuário vinculado a esse sensor" });
     }
 
-    console.log("👥 Usuários vinculados:", usuariosIds);
-
-    // =============================
-    // 2. Hora atual Brasil
-    // =============================
+    // Hora BR
     const agora = new Date();
     const agoraBR = new Date(
       agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
     );
 
-    const diaAtual = agoraBR.getDay(); // 0 = Domingo
+    const diaAtual = agoraBR.getDay();
     const minutosAgora = agoraBR.getHours() * 60 + agoraBR.getMinutes();
-
-    console.log("🕒 Agora BR:", agoraBR.toLocaleString(), "| Dia:", diaAtual);
 
     let eventosSalvos = 0;
     let notificacoesEnviadas = 0;
 
-    // =============================
-    // 3. Para cada usuário
-    // =============================
     for (const uid of usuariosIds) {
 
       const deviceRef = db
@@ -616,10 +605,8 @@ app.post("/esp/event", async (req, res) => {
         .collection("espDevices")
         .doc(macNormalizado);
 
-      // 🔹 Buscar horários
-      const horariosSnapshot = await deviceRef
-        .collection("horarios")
-        .get();
+      // --- horários
+      const horariosSnapshot = await deviceRef.collection("horarios").get();
 
       let dentroDoHorario = false;
 
@@ -627,10 +614,7 @@ app.post("/esp/event", async (req, res) => {
         const data = doc.data();
 
         if (!data.ativo) continue;
-
-        if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) {
-          continue;
-        }
+        if (!Array.isArray(data.dias) || !data.dias.includes(diaAtual)) continue;
 
         const [inicioH, inicioM] = data.inicio.split(":").map(Number);
         const [fimH, fimM] = data.fim.split(":").map(Number);
@@ -638,15 +622,13 @@ app.post("/esp/event", async (req, res) => {
         const inicioMin = inicioH * 60 + inicioM;
         const fimMin = fimH * 60 + fimM;
 
-        // Caso normal
         if (inicioMin <= fimMin) {
           if (minutosAgora >= inicioMin && minutosAgora <= fimMin) {
             dentroDoHorario = true;
             break;
           }
-        } 
-        // Caso atravessa meia-noite
-        else {
+        } else {
+          // atravessa meia-noite
           if (minutosAgora >= inicioMin || minutosAgora <= fimMin) {
             dentroDoHorario = true;
             break;
@@ -659,67 +641,52 @@ app.post("/esp/event", async (req, res) => {
         continue;
       }
 
-      console.log(`✅ Usuário ${uid} dentro do horário`);
-
       const nomeSensor = sensorData.nome || macNormalizado;
       const mensagemFinal = `${nomeSensor}: ${mensagem}`;
 
-      // =============================
-      // 4. Salvar evento no usuário
-      // =============================
+      // ✅ SALVANDO NO FLUXO CORRETO
       const eventRef = await deviceRef
         .collection("events")
         .add({
           mac: macNormalizado,
           mensagem: mensagemFinal,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ PADRÃO
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
           notificado: false
         });
 
       eventosSalvos++;
 
-      // =============================
-      // 5. Buscar token FCM
-      // =============================
+      // Push
       const userDoc = await db.collection("users").doc(uid).get();
       const fcmToken = userDoc.data()?.fcmToken;
 
-      if (!fcmToken) {
-        console.warn(`⚠ Usuário ${uid} sem token FCM`);
-        continue;
-      }
+      if (fcmToken) {
+        try {
+          await admin.messaging().send({
+            token: fcmToken,
+            notification: {
+              title: "🚨 Alerta Seguro",
+              body: mensagemFinal
+            },
+            data: {
+              mac: macNormalizado,
+              mensagem: mensagemFinal
+            }
+          });
 
-      // =============================
-      // 6. Enviar push
-      // =============================
-      try {
-        await admin.messaging().send({
-          token: fcmToken,
-          notification: {
-            title: "🚨 Alerta Seguro",
-            body: mensagemFinal
-          },
-          data: {
-            mac: macNormalizado,
-            mensagem: mensagemFinal
-          }
-        });
+          await eventRef.update({ notificado: true });
+          notificacoesEnviadas++;
 
-        await eventRef.update({ notificado: true });
-
-        notificacoesEnviadas++;
-        console.log(`📩 Push enviado para ${uid}`);
-
-      } catch (err) {
-        console.error(`❌ Erro ao enviar push para ${uid}:`, err.message);
+        } catch (err) {
+          console.error(`❌ Erro ao enviar push para ${uid}:`, err.message);
+        }
       }
     }
 
     return res.json({
       success: true,
-      usuariosVinculados: usuariosIds.length,
       eventosSalvos,
-      notificacoesEnviadas
+      notificacoesEnviadas,
     });
 
   } catch (error) {
@@ -827,25 +794,32 @@ app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
   const { uid, mac, eventId } = req.params;
 
   try {
+    const decodedMac = decodeURIComponent(mac).toLowerCase();
+
     const eventRef = db
       .collection("users")
       .doc(uid)
       .collection("espDevices")
-      .doc(mac)
+      .doc(decodedMac)
       .collection("events")
       .doc(eventId);
 
     const docSnap = await eventRef.get();
-    if (!docSnap.exists) return res.status(404).json({ error: "Evento não encontrado" });
+
+    if (!docSnap.exists) {
+      return res.status(404).json({ error: "Evento não encontrado" });
+    }
 
     await eventRef.delete();
 
-    return res.status(200).json({ message: "Notificação deletada com sucesso" });
+    return res.json({ msg: "Evento deletado com sucesso!" });
+
   } catch (error) {
-    console.error("Erro ao deletar notificação:", error);
-    return res.status(500).json({ error: error.message });
+    console.error("Erro ao deletar evento:", error);
+    return res.status(500).json({ error: "Erro ao deletar evento" });
   }
 });
+
 
 
 // =======================
