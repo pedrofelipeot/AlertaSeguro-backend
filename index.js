@@ -703,9 +703,9 @@ app.post("/esp/event", async (req, res) => {
 });
 
 
-
-
+// =====================================
 // DELETE /usuario/:uid
+// =====================================
 app.delete("/usuario/:uid", async (req, res) => {
   const { uid } = req.params;
 
@@ -722,7 +722,11 @@ app.delete("/usuario/:uid", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
+
+
+// =====================================
 // DELETE /esp/:uid/:mac
+// =====================================
 app.delete("/esp/:uid/:mac", async (req, res) => {
   const { uid, mac } = req.params;
 
@@ -738,8 +742,8 @@ app.delete("/esp/:uid/:mac", async (req, res) => {
     if (!docSnap.exists)
       return res.status(404).json({ error: "Sensor não encontrado" });
 
-    // 🔥 Deletar subcoleções primeiro
-    const subcollections = ["horarios", "eventos", "notificacoes"];
+    // 🔥 Subcoleções que realmente existem:
+    const subcollections = ["horarios", "events", "notificacoes"];
 
     for (const sub of subcollections) {
       const subRef = espRef.collection(sub);
@@ -772,7 +776,10 @@ app.delete("/esp/:uid/:mac", async (req, res) => {
   }
 });
 
+
+// =====================================
 // DELETE /esp/horarios/:uid/:mac/:horarioId
+// =====================================
 app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
   const { uid, mac, horarioId } = req.params;
 
@@ -786,7 +793,8 @@ app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
       .doc(horarioId);
 
     const docSnap = await horarioRef.get();
-    if (!docSnap.exists) return res.status(404).json({ error: "Horário não encontrado" });
+    if (!docSnap.exists)
+      return res.status(404).json({ error: "Horário não encontrado" });
 
     await horarioRef.delete();
 
@@ -797,7 +805,10 @@ app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
   }
 });
 
+
+// =====================================
 // DELETE /notificacao/:uid/:mac/:eventId
+// =====================================
 app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
   const { uid, mac, eventId } = req.params;
 
@@ -809,7 +820,7 @@ app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
       .doc(uid)
       .collection("espDevices")
       .doc(decodedMac)
-      .collection("events")
+      .collection("events")  // <-- agora correto
       .doc(eventId);
 
     const docSnap = await eventRef.get();
@@ -827,7 +838,6 @@ app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
     return res.status(500).json({ error: "Erro ao deletar evento" });
   }
 });
-
 
 
 // =======================
