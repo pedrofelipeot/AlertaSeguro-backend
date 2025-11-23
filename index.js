@@ -515,7 +515,6 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
   const { userId, mac } = req.params;
 
   try {
-    // 🔹 Decodifica o MAC da URL
     const decodedMac = decodeURIComponent(mac);
 
     const eventsRef = db
@@ -524,40 +523,39 @@ app.get("/esp/events/:userId/:mac", async (req, res) => {
       .collection("espDevices")
       .doc(decodedMac)
       .collection("events")
-      .orderBy("createdAt", "desc");
+      .orderBy("createdAt", "desc"); // ✅ CORRETO
 
     const snapshot = await eventsRef.get();
 
     const events = snapshot.docs.map((doc) => {
       const data = doc.data();
 
-      // JS puro: sem anotação de tipo
       let dataLocal = { ...data };
 
       if (data.createdAt && data.createdAt._seconds) {
-        // converte timestamp Firestore para Date
         const date = new Date(data.createdAt._seconds * 1000);
 
-        // 🔹 Ajuste para horário de Brasília (UTC-3)
+        // 🔹 Horário Brasil (UTC-3)
         date.setHours(date.getHours() - 3);
 
-        // adiciona campos já formatados para frontend
-        dataLocal.data = date.toLocaleDateString('pt-BR'); // dd/mm/yyyy
-        dataLocal.hora = date.toLocaleTimeString('pt-BR', { hour12: false }); // HH:MM:SS
+        dataLocal.data = date.toLocaleDateString("pt-BR");
+        dataLocal.hora = date.toLocaleTimeString("pt-BR", { hour12: false });
       }
 
       return {
         id: doc.id,
-        ...dataLocal,
+        ...dataLocal
       };
     });
 
     return res.status(200).json(events);
+
   } catch (error) {
     console.error("Erro ao buscar eventos:", error);
     return res.status(500).json({ error: "Erro ao buscar eventos" });
   }
 });
+
 
 app.post("/esp/event", async (req, res) => {
   const { mac, mensagem } = req.body;
@@ -618,7 +616,7 @@ app.post("/esp/event", async (req, res) => {
         .collection("espDevices")
         .doc(macNormalizado);
 
-      // 3.1 Buscar horários
+      // 🔹 Buscar horários
       const horariosSnapshot = await deviceRef
         .collection("horarios")
         .get();
@@ -674,7 +672,7 @@ app.post("/esp/event", async (req, res) => {
         .add({
           mac: macNormalizado,
           mensagem: mensagemFinal,
-          dataHora: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(), // ✅ PADRÃO
           notificado: false
         });
 
@@ -717,9 +715,6 @@ app.post("/esp/event", async (req, res) => {
       }
     }
 
-    // =============================
-    // 7. Resposta
-    // =============================
     return res.json({
       success: true,
       usuariosVinculados: usuariosIds.length,
@@ -732,6 +727,7 @@ app.post("/esp/event", async (req, res) => {
     return res.status(500).json({ error: "Erro interno no servidor" });
   }
 });
+
 
 
 // DELETE /usuario/:uid
