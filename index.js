@@ -805,28 +805,27 @@ app.delete("/esp/horarios/:uid/:mac/:horarioId", async (req, res) => {
   }
 });
 
-
 // =====================================
-// DELETE /notificacao/:uid/:mac/:eventId
+// DELETE /users/:uid/espdevices/:mac/events/:eventId
 // =====================================
-app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
+app.delete("/users/:uid/espdevices/:mac/events/:eventId", async (req, res) => {
   const { uid, mac, eventId } = req.params;
 
   try {
-    const decodedMac = decodeURIComponent(mac).toLowerCase();
+    const decodedMac = decodeURIComponent(mac).toLowerCase().trim();
 
     const eventRef = db
       .collection("users")
       .doc(uid)
       .collection("espDevices")
       .doc(decodedMac)
-      .collection("events")  // <-- agora correto
+      .collection("events")
       .doc(eventId);
 
     const docSnap = await eventRef.get();
 
     if (!docSnap.exists) {
-      return res.status(404).json({ error: "Evento não encontrado" });
+      return res.status(404).json({ error: "Evento não encontrado." });
     }
 
     await eventRef.delete();
@@ -834,10 +833,11 @@ app.delete("/notificacao/:uid/:mac/:eventId", async (req, res) => {
     return res.json({ msg: "Evento deletado com sucesso!" });
 
   } catch (error) {
-    console.error("Erro ao deletar evento:", error);
-    return res.status(500).json({ error: "Erro ao deletar evento" });
+    console.error("❌ Erro ao deletar evento:", error);
+    return res.status(500).json({ error: "Erro ao deletar evento." });
   }
 });
+
 
 
 // =======================
